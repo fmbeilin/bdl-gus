@@ -34,6 +34,12 @@ Columns: `variable_id`, `unitId` (12-char zero-padded VARCHAR, GUS unit code),
 
 Example: `SELECT * FROM codebook WHERE variable_id = 6`
 
+## Hosted copy: Hugging Face
+
+The parquet archive (plus codebook, units, variables, subjects) is mirrored at
+`hf://datasets/fmbeilin/gus-bdl` (private for now). DuckDB queries it in place
+over HTTP; bdlR falls back to it automatically when no local store is found.
+
 ## Parquet archive: lake_v2/
 
 One compacted zstd parquet file per level (~1 GB total), exported by
