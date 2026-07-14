@@ -1,0 +1,19 @@
+Package: bdlR
+Title: Query the GUS Bank Danych Lokalnych (BDL) Local Data Store
+Version: 0.1.0
+Authors@R: person("Felix", "Beilin", role = c("aut", "cre"),
+    email = "fbeilin@princeton.edu")
+Description: Provides a convenient interface for querying a local Parquet/DuckDB
+    store of data scraped from the Polish Central Statistical Office (GUS)
+    Bank Danych Lokalnych (BDL) API. Supports filtering by variable, subject
+    category, geographic level, year, and administrative unit.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Imports:
+    DBI,
+    duckdb
+Suggests:
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Config/roxygen2/version: 8.0.0

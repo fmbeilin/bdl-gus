@@ -1,0 +1,29 @@
+# --- data: hosted separately (see README), never in git ---
+*.duckdb
+*.duckdb.wal
+lake/
+lake_v2/
+localities/
+tmp/
+*_all_long.csv
+
+# extraction bookkeeping & logs
+*.log
+*_completed_vars.csv
+*_failed_vars.csv
+*_failed_vars_key*.csv
+convert_checkpoints/
+
+# analysis outputs (not part of the pipeline)
+control_gminy_economic_growth_ranking.csv
+economic_growth_10gminy.csv
+rural_gminy_population_trajectories.csv
+werbkowice_vs_*.csv
+wykleci_gminy_population.csv
+
+# macOS / exFAT junk
+.DS_Store
+._*
+
+# local claude config
+.claude/
