@@ -7,7 +7,8 @@
 bdl_path()
 }
 \value{
-Character scalar: path to the data store root.
+Character scalar: path to the data store root, or \code{NA_character_}
+if not set (in which case connections fall back to the remote store).
 }
 \description{
 Reads from option \code{bdlR.path} or environment variable \code{BDL_PATH}.

@@ -30,7 +30,9 @@
 #'   Returns the "headline" figure without any cross-tabulation. Default `FALSE`.
 #' @param add_labels Logical. If `TRUE` (default), joins variable metadata
 #'   (subject name, dimensions, measure unit) from the codebook.
-#' @param path Path to the data store root. Defaults to `bdl_path()`.
+#' @param path Deprecated and ignored. The store is resolved by
+#'   [bdl_connect()] from `bdlR.path`/`BDL_PATH`, with a remote Hugging Face
+#'   fallback when no local store is present.
 #'
 #' @return A `data.frame` with columns:
 #'   `variable_id`, `unitId`, `unitName`, `unitLevel`, `year`, `value`,
@@ -67,7 +69,7 @@ get_bdl <- function(
   dims       = NULL,
   aggregate  = FALSE,
   add_labels = TRUE,
-  path       = bdl_path()
+  path       = NULL
 ) {
   if (is.null(variables) && is.null(subjects)) {
     stop("Provide at least one of `variables` or `subjects`.", call. = FALSE)

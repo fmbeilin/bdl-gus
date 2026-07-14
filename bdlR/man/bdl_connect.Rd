@@ -7,15 +7,19 @@
 bdl_connect(path = bdl_path())
 }
 \arguments{
-\item{path}{Path to the data store root. Defaults to \code{bdl_path()}.}
+\item{path}{Path to the data store root. Defaults to \code{bdl_path()};
+\code{NA} triggers the remote fallback.}
 }
 \value{
 A DBI connection object. Caller is responsible for closing with \code{DBI::dbDisconnect()}.
 }
 \description{
-Connects to \code{bdl_gus_v2.duckdb}, which holds both the fact tables
+Connects to the local \code{bdl_gus_v2.duckdb}, which holds both the fact tables
 (facts_gminy, facts_powiaty, facts_podregiony, facts_wojewodztwa,
 facts_makroregiony) and the metadata (variables, subjects, units, codebook).
-Falls back to the legacy metadata-only \code{bdl_gus.duckdb} with a warning if
-the v2 store is not present.
+}
+\details{
+If no local store is available — \code{bdlR.path}/\code{BDL_PATH} unset, or the
+DuckDB file missing — falls back to the remote Hugging Face store via
+\code{\link[=bdl_connect_remote]{bdl_connect_remote()}}, with a message.
 }

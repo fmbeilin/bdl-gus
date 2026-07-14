@@ -14,7 +14,7 @@ get_bdl(
   dims = NULL,
   aggregate = FALSE,
   add_labels = TRUE,
-  path = bdl_path()
+  path = NULL
 )
 }
 \arguments{
@@ -54,7 +54,9 @@ Returns the "headline" figure without any cross-tabulation. Default \code{FALSE}
 \item{add_labels}{Logical. If \code{TRUE} (default), joins variable metadata
 (subject name, dimensions, measure unit) from the codebook.}
 
-\item{path}{Path to the data store root. Defaults to \code{bdl_path()}.}
+\item{path}{Deprecated and ignored. The store is resolved by
+\code{\link[=bdl_connect]{bdl_connect()}} from \code{bdlR.path}/\code{BDL_PATH}, with a remote Hugging Face
+fallback when no local store is present.}
 }
 \value{
 A \code{data.frame} with columns:
