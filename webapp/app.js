@@ -7,13 +7,23 @@ const DATA_BASE = LOCAL
   ? `${location.origin}/lake_v2`
   : "https://huggingface.co/datasets/fmbeilin/gus-bdl/resolve/main";
 
-const LEVEL_FILES = {
-  gminy: "facts_gminy.parquet",
-  powiaty: "facts_powiaty.parquet",
-  podregiony: "facts_podregiony.parquet",
-  wojewodztwa: "facts_wojewodztwa.parquet",
-  makroregiony: "facts_makroregiony.parquet",
+const LEVEL_TABLES = {
+  gminy: "facts_gminy",
+  powiaty: "facts_powiaty",
+  podregiony: "facts_podregiony",
+  wojewodztwa: "facts_wojewodztwa",
+  makroregiony: "facts_makroregiony",
 };
+// manifest.json maps variable_id ranges to part files for split levels;
+// fetching only the overlapping parts keeps remote queries to a few requests.
+let manifest = null;
+function filesFor(level, varIds) {
+  const tbl = LEVEL_TABLES[level];
+  const entries = manifest?.[tbl];
+  if (!entries) return [`${DATA_BASE}/${tbl}.parquet`];
+  const hit = entries.filter(e => varIds.some(v => v >= e.var_min && v <= e.var_max));
+  return (hit.length ? hit : entries).map(e => `${DATA_BASE}/${e.file}`);
+}
 const LEVEL_CODES = { gminy: 6, powiaty: 5, podregiony: 4, wojewodztwa: 2, makroregiony: 1 };
 const MAX_SERIES = 8;
 const SERIES_VARS = [1, 2, 3, 4, 5, 6, 7, 8].map(i => `var(--series-${i})`);
@@ -58,6 +68,10 @@ async function init() {
       SELECT unitId, unitName, unitLevel,
              replace(strip_accents(lower(unitName)), 'ł', 'l') AS search_key
       FROM read_parquet('${DATA_BASE}/units.parquet')`);
+
+    try {
+      manifest = await (await fetch(`${DATA_BASE}/manifest.json`, { cache: "no-cache" })).json();
+    } catch { manifest = null; }       // older single-file layout still works
 
     window.__bdl = { conn, duckdb };   // console debugging hook
     $("var-search").disabled = false;
@@ -216,7 +230,8 @@ function buildWhere() {
 
 async function runQuery() {
   const level = $("level-select").value;
-  const file = `${DATA_BASE}/${LEVEL_FILES[level]}`;
+  const files = filesFor(level, [...state.vars.keys()]);
+  const fileListSql = `[${files.map(sqlQuote).join(",")}]`;
   const where = buildWhere();
   setStatus("busy", "Querying…");
   $("run-btn").disabled = true;
@@ -224,7 +239,7 @@ async function runQuery() {
   try {
     const res = await conn.query(`
       SELECT variable_id, unitId, unitName, year, value
-      FROM read_parquet(${sqlQuote(file)})
+      FROM read_parquet(${fileListSql})
       WHERE ${where}
       ORDER BY variable_id, unitId, year`);
     const rows = res.toArray().map(r => r.toJSON());

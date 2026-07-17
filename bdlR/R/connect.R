@@ -62,10 +62,16 @@ bdl_connect_remote <- function(repo = bdl_remote_repo()) {
       gsub("'", "''", tok)))
   }
   base <- sprintf("hf://datasets/%s", repo)
-  tables <- c("facts_gminy", "facts_powiaty", "facts_podregiony",
-              "facts_wojewodztwa", "facts_makroregiony",
-              "codebook", "units", "variables", "subjects")
-  for (t in tables) {
+  # gminy and powiaty are split into part files by variable_id range (see
+  # manifest.json in the dataset); the rest are single files.
+  split_tables  <- c("facts_gminy", "facts_powiaty")
+  single_tables <- c("facts_podregiony", "facts_wojewodztwa", "facts_makroregiony",
+                     "codebook", "units", "variables", "subjects")
+  for (t in split_tables) {
+    DBI::dbExecute(con, sprintf(
+      "CREATE VIEW %s AS SELECT * FROM read_parquet('%s/%s/part-*.parquet')", t, base, t))
+  }
+  for (t in single_tables) {
     DBI::dbExecute(con, sprintf(
       "CREATE VIEW %s AS SELECT * FROM read_parquet('%s/%s.parquet')", t, base, t))
   }
