@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GUS BDL Explorer</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <h1>GUS BDL Explorer</h1>
+    <p class="tagline">Polish Local Data Bank — 1.26 billion observations, queried live in your browser</p>
+  </div>
+  <div id="status" class="status status-loading">Starting DuckDB…</div>
+</header>
+
+<main>
+  <!-- Step 1: find variables -->
+  <section class="panel" id="panel-vars">
+    <h2><span class="step">1</span> Find variables</h2>
+    <input type="search" id="var-search" placeholder="Search variables in Polish, e.g. ludność, bezrobocie, dochody gmin…" autocomplete="off" disabled>
+    <div id="var-results" class="var-results" hidden></div>
+    <div id="var-chips" class="chips"></div>
+  </section>
+
+  <!-- Step 2: scope -->
+  <section class="panel" id="panel-scope">
+    <h2><span class="step">2</span> Choose scope</h2>
+    <div class="scope-row">
+      <label class="field">
+        <span>Level</span>
+        <select id="level-select">
+          <option value="gminy" selected>Gminy (municipalities)</option>
+          <option value="powiaty">Powiaty (counties)</option>
+          <option value="podregiony">Podregiony (subregions)</option>
+          <option value="wojewodztwa">Województwa (voivodeships)</option>
+          <option value="makroregiony">Makroregiony</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Years</span>
+        <span class="year-pair">
+          <input type="number" id="year-from" placeholder="from" min="1995" max="2024">
+          <span class="year-dash">–</span>
+          <input type="number" id="year-to" placeholder="to" min="1995" max="2024">
+        </span>
+      </label>
+    </div>
+    <label class="field">
+      <span>Units <span class="hint">(empty = all units at this level)</span></span>
+      <input type="search" id="unit-search" placeholder="Search units, e.g. Bochnia, Kraków…" autocomplete="off" disabled>
+    </label>
+    <div id="unit-results" class="var-results" hidden></div>
+    <div id="unit-chips" class="chips"></div>
+  </section>
+
+  <!-- Step 3: run -->
+  <section class="panel panel-run">
+    <button id="run-btn" class="run-btn" disabled>Fetch data</button>
+    <span id="run-note" class="hint"></span>
+  </section>
+
+  <!-- Results -->
+  <section class="panel" id="panel-results" hidden>
+    <div class="results-head">
+      <h2 id="results-title">Results</h2>
+      <div class="results-actions">
+        <button id="toggle-view" class="ghost-btn" aria-pressed="false">Table view</button>
+        <button id="dl-csv" class="ghost-btn">Download CSV</button>
+      </div>
+    </div>
+    <div id="result-summary" class="result-summary"></div>
+    <div id="chart-wrap" class="viz-root">
+      <div id="chart-note" class="chart-note" hidden></div>
+      <div id="chart"></div>
+      <div id="legend" class="legend"></div>
+    </div>
+    <div id="table-wrap" hidden>
+      <div class="table-scroll"><table id="result-table"></table></div>
+      <p class="hint" id="table-note"></p>
+    </div>
+  </section>
+
+  <section class="panel panel-about">
+    <h2>About</h2>
+    <p>Every published variable of the GUS <a href="https://bdl.stat.gov.pl" rel="noopener">Bank Danych Lokalnych</a>
+    at every level from gmina upward, extracted via the official API (1995–2024 where available).
+    Queries run entirely in your browser with <a href="https://duckdb.org/docs/api/wasm/overview" rel="noopener">DuckDB-WASM</a>
+    against hosted Parquet files — only the row groups your query needs are downloaded; there is no server.</p>
+    <p>Bulk data: <span id="data-source-note"></span></p>
+    <p class="attribution">Data source: Główny Urząd Statystyczny (Statistics Poland), Bank Danych Lokalnych, bdl.stat.gov.pl.
+    This is an independent interface, not affiliated with or endorsed by GUS.</p>
+  </section>
+</main>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
