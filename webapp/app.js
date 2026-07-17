@@ -1,8 +1,10 @@
 // GUS BDL Explorer — DuckDB-WASM against hosted parquet, no backend.
-import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/+esm";
+import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.33.1-dev57.0/+esm";
 
 // Local dev (http-server at repo root) uses the local lake; anywhere else, HF.
-const LOCAL = ["localhost", "127.0.0.1"].includes(location.hostname);
+// ?data=remote forces the hosted dataset even on localhost (for testing).
+const LOCAL = ["localhost", "127.0.0.1"].includes(location.hostname)
+  && new URLSearchParams(location.search).get("data") !== "remote";
 const DATA_BASE = LOCAL
   ? `${location.origin}/lake_v2`
   : "https://huggingface.co/datasets/fmbeilin/gus-bdl/resolve/main";
