@@ -17,11 +17,13 @@
 </header>
 
 <main>
-  <!-- Step 1: find variables -->
+  <!-- Step 1: find data (subject-first) -->
   <section class="panel" id="panel-vars">
-    <h2><span class="step">1</span> Find variables</h2>
-    <input type="search" id="var-search" placeholder="Search variables in Polish, e.g. ludność, bezrobocie, dochody gmin…" autocomplete="off" disabled>
-    <div id="var-results" class="var-results" hidden></div>
+    <h2><span class="step">1</span> Find data</h2>
+    <input type="search" id="var-search" placeholder="Search a topic in Polish, e.g. ludność, bezrobocie, wynagrodzenia…" autocomplete="off" disabled>
+    <div id="quick-starts" class="quick-starts"></div>
+    <div id="subj-results" class="var-results" hidden></div>
+    <div id="facet-panel" class="facet-panel" hidden></div>
     <div id="var-chips" class="chips"></div>
   </section>
 

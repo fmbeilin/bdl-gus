@@ -62,8 +62,10 @@ async function init() {
     await conn.query(`
       CREATE TABLE codebook AS
       SELECT variable_id, subjectId, subject_name, variable_dimensions,
+             n1, n2, n3, n4, n5,
              unit_level, measureUnitName, variable_full_name,
-             replace(strip_accents(lower(subject_name || ' ' || coalesce(variable_dimensions,''))), 'ł', 'l') AS search_key
+             replace(strip_accents(lower(subject_name || ' ' || coalesce(variable_dimensions,''))), 'ł', 'l') AS search_key,
+             replace(strip_accents(lower(subject_name)), 'ł', 'l') AS subj_norm
       FROM read_parquet('${DATA_BASE}/codebook.parquet')`);
     await conn.query(`
       CREATE TABLE units AS
@@ -76,6 +78,7 @@ async function init() {
     } catch { manifest = null; }       // older single-file layout still works
 
     window.__bdl = { conn, duckdb };   // console debugging hook
+    renderQuickStarts();
     $("var-search").disabled = false;
     $("unit-search").disabled = false;
     $("data-source-note").innerHTML = LOCAL
@@ -98,57 +101,182 @@ function debounce(fn, ms) {
   let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
-// ---------- variable search ----------
-async function searchVariables(q) {
-  const box = $("var-results");
+// ---------- subject (concept) search ----------
+const DIMS = ["n1", "n2", "n3", "n4", "n5"];
+const MAX_VARS = 60;
+const QUICK_STARTS = [
+  ["Population", "ludność"],
+  ["Unemployment", "bezrobotni"],
+  ["Wages", "wynagrodzenia"],
+  ["Dwellings", "mieszkania"],
+  ["Businesses", "podmioty gospodarki"],
+  ["Municipal revenue", "dochody"],
+];
+
+function renderQuickStarts() {
+  const wrap = $("quick-starts");
+  wrap.innerHTML = "";
+  for (const [label, q] of QUICK_STARTS) {
+    const b = document.createElement("button");
+    b.className = "quick-start"; b.type = "button"; b.textContent = label;
+    b.onclick = () => { const i = $("var-search"); i.value = q; i.focus(); searchSubjects(q); };
+    wrap.appendChild(b);
+  }
+}
+
+async function searchSubjects(q) {
+  const box = $("subj-results");
+  $("facet-panel").hidden = true;
   if (q.trim().length < 2) { box.hidden = true; return; }
   const terms = normalize(q).split(/\s+/).filter(Boolean);
+  // Broad filter: all terms appear somewhere (name or a breakdown value).
   const where = terms.map(t => `search_key LIKE ${sqlQuote("%" + t + "%")}`).join(" AND ");
+  // name_all: every term appears in the SUBJECT NAME (not just a dimension value).
+  const nameAll = terms.map(t => `norm LIKE ${sqlQuote("%" + t + "%")}`).join(" AND ");
   const lvl = LEVEL_CODES[$("level-select").value];
+  const prefix = sqlQuote(normalize(q) + "%");
+  // One row per subject (concept). Rank: name matches above dimension-only
+  // matches, then prefix hits, then simpler (shorter, fewer-qualifier) names.
   const res = await conn.query(`
-    SELECT variable_id, subject_name, variable_dimensions, measureUnitName, unit_level
-    FROM codebook WHERE ${where} AND unit_level >= ${lvl}
-    ORDER BY subject_name, variable_id LIMIT 200`);
+    WITH s AS (
+      SELECT subjectId,
+             any_value(subject_name) AS name,
+             any_value(subj_norm)   AS norm,
+             count(*)               AS n_vars,
+             any_value(measureUnitName) AS unit
+      FROM codebook WHERE ${where} AND unit_level >= ${lvl}
+      GROUP BY subjectId
+    )
+    SELECT subjectId, name, n_vars, unit,
+      (CASE WHEN ${nameAll} THEN 0 ELSE 1 END) AS name_match,
+      (CASE WHEN norm LIKE ${prefix} THEN 0 ELSE 1 END) AS is_prefix,
+      (length(name) - length(replace(name, ',', ''))) AS commas,
+      length(name) AS namelen
+    FROM s ORDER BY name_match, is_prefix, commas, namelen, n_vars DESC LIMIT 40`);
   const rows = res.toArray().map(r => r.toJSON());
   box.innerHTML = "";
   if (!rows.length) {
-    box.innerHTML = `<div class="var-more">No matches. Search uses Polish variable names (diacritics optional).</div>`;
+    box.innerHTML = `<div class="var-more">No topics match at this level. Search uses Polish topic names (diacritics optional).</div>`;
     box.hidden = false; return;
   }
-  let lastSubject = null;
-  for (const r of rows) {
-    if (r.subject_name !== lastSubject) {
-      lastSubject = r.subject_name;
-      const h = document.createElement("div");
-      h.className = "var-group-head"; h.textContent = r.subject_name;
-      box.appendChild(h);
-    }
-    const b = document.createElement("button");
-    b.className = "var-row"; b.type = "button";
-    b.innerHTML = `<span>${r.variable_dimensions || "ogółem"}</span>
-       <span class="meta">#${r.variable_id} · ${r.measureUnitName || ""}</span>`;
-    b.onclick = () => addVariable({
-      id: Number(r.variable_id),
-      name: `${r.subject_name}: ${r.variable_dimensions || "ogółem"}`,
-      measure: r.measureUnitName,
-    });
-    box.appendChild(b);
+  // If nothing matches by NAME at this level, the term only appears inside
+  // breakdowns — usually because the topic isn't collected at this level.
+  if (Number(rows[0].name_match) === 1) {
+    const levelName = $("level-select").selectedOptions[0].text;
+    const h = document.createElement("div");
+    h.className = "var-more";
+    h.innerHTML = `No topic is named “${normalize(q)}” at <strong>${levelName}</strong> level — ` +
+      `it may be collected only at a higher level (try powiat or województwo). ` +
+      `The topics below just mention it inside a breakdown.`;
+    box.appendChild(h);
   }
-  if (rows.length === 200) {
-    const m = document.createElement("div");
-    m.className = "var-more"; m.textContent = "Showing first 200 matches — refine your search.";
-    box.appendChild(m);
+  for (const r of rows) {
+    const b = document.createElement("button");
+    b.className = "var-row subj-row"; b.type = "button";
+    const breakdowns = r.n_vars > 1 ? `${fmt.format(Number(r.n_vars))} breakdowns` : "single series";
+    b.innerHTML = `<span>${r.name}</span>
+      <span class="subj-meta">${breakdowns}${r.unit && r.unit !== "-" ? " · " + r.unit : ""}</span>`;
+    b.onclick = () => openSubject(r.subjectId, r.name);
+    box.appendChild(b);
   }
   box.hidden = false;
 }
 
-function addVariable(v) {
-  if (state.vars.size >= 12 && !state.vars.has(v.id)) {
-    alert("Up to 12 variables per query. Remove one first."); return;
+// Try to name each breakdown axis from the subject title ("… wg płci i wieku").
+function dimLabelsFromName(name, count) {
+  const m = name.match(/(?:wg|według)\s+(.+)$/i);
+  if (m) {
+    const parts = m[1].split(/\s*,\s*|\s+i\s+/).map(s => s.trim()).filter(Boolean);
+    if (parts.length === count) return parts.map(p => p.charAt(0).toUpperCase() + p.slice(1));
   }
-  state.vars.set(v.id, v);
+  return Array.from({ length: count }, (_, i) => count === 1 ? "Breakdown" : `Breakdown ${i + 1}`);
+}
+
+const ALL = "__ALL__";  // sentinel for "all values" (cannot collide with a real dim value)
+function sortVals(vals) {
+  return vals.slice().sort((a, b) =>
+    a === "ogółem" ? -1 : b === "ogółem" ? 1 : a.localeCompare(b, "pl"));
+}
+
+let facetState = null;   // { rows, facets:[{dim,label,values}], name }
+
+async function openSubject(subjectId, name) {
+  $("subj-results").hidden = true;
+  const res = await conn.query(`
+    SELECT variable_id, n1, n2, n3, n4, n5, variable_full_name, measureUnitName
+    FROM codebook WHERE subjectId = ${sqlQuote(subjectId)} ORDER BY variable_id`);
+  const rows = res.toArray().map(r => r.toJSON());
+  const activeDims = DIMS.filter(d => {
+    const vals = new Set(rows.map(r => r[d]).filter(v => v != null && v !== "NA"));
+    return vals.size > 1;
+  });
+  const labels = dimLabelsFromName(name, activeDims.length);
+  const facets = activeDims.map((d, i) => ({
+    dim: d, label: labels[i],
+    values: sortVals([...new Set(rows.map(r => r[d]).filter(v => v != null && v !== "NA"))]),
+  }));
+  facetState = { rows, facets, name };
+  renderFacetPanel();
+}
+
+function currentSelections() {
+  return facetState.facets.map(f => $(`facet-${f.dim}`).value);
+}
+function resolveVars() {
+  const sel = currentSelections();
+  return facetState.rows.filter(r =>
+    facetState.facets.every((f, i) => sel[i] === ALL || r[f.dim] === sel[i]));
+}
+
+function renderFacetPanel() {
+  const panel = $("facet-panel");
+  const { facets, name } = facetState;
+  const facetHtml = facets.map(f => {
+    const opts = [`<option value="${ALL}">— all (${f.values.length}) —</option>`]
+      .concat(f.values.map(v => `<option value="${v.replace(/"/g, "&quot;")}"${v === "ogółem" ? " selected" : ""}>${v}</option>`))
+      .join("");
+    return `<label class="facet"><span>${f.label}</span><select id="facet-${f.dim}">${opts}</select></label>`;
+  }).join("");
+  panel.innerHTML = `
+    <div class="facet-title">${name}</div>
+    <div class="facet-sub">${facets.length ? "Choose a breakdown, or “all” for every value. Total (ogółem) is preselected." : "This topic has a single series."}</div>
+    ${facets.length ? `<div class="facet-grid">${facetHtml}</div>` : ""}
+    <div class="facet-foot">
+      <button class="facet-add" id="facet-add">Add to query</button>
+      <button class="facet-cancel" id="facet-cancel">Cancel</button>
+      <span class="facet-count" id="facet-count"></span>
+    </div>`;
+  facets.forEach(f => $(`facet-${f.dim}`).addEventListener("change", updateFacetCount));
+  $("facet-add").addEventListener("click", addFacetSelection);
+  $("facet-cancel").addEventListener("click", () => { panel.hidden = true; facetState = null; });
+  panel.hidden = false;
+  updateFacetCount();
+}
+
+function updateFacetCount() {
+  const n = resolveVars().length;
+  const el = $("facet-count");
+  el.innerHTML = `Selects <strong>${fmt.format(n)}</strong> series`;
+  $("facet-add").disabled = n === 0;
+  if (n > MAX_VARS) el.innerHTML += ` — narrow the breakdown (max ${MAX_VARS} per add)`;
+}
+
+function addFacetSelection() {
+  const resolved = resolveVars();
+  if (!resolved.length || resolved.length > MAX_VARS) return;
+  if (state.vars.size + resolved.length > MAX_VARS && !resolved.every(r => state.vars.has(Number(r.variable_id)))) {
+    alert(`That would exceed ${MAX_VARS} series. Remove some first.`); return;
+  }
+  for (const r of resolved) {
+    state.vars.set(Number(r.variable_id), {
+      id: Number(r.variable_id),
+      name: r.variable_full_name,
+      measure: r.measureUnitName,
+    });
+  }
   renderChips("var-chips", state.vars);
-  $("var-results").hidden = true;
+  $("facet-panel").hidden = true;
+  facetState = null;
   $("var-search").value = "";
   updateRunState();
 }
@@ -477,11 +605,13 @@ function downloadCsv() {
 }
 
 // ---------- wire up ----------
-$("var-search").addEventListener("input", debounce(e => searchVariables(e.target.value), 200));
+$("var-search").addEventListener("input", debounce(e => searchSubjects(e.target.value), 200));
 $("unit-search").addEventListener("input", debounce(e => searchUnits(e.target.value), 200));
 $("level-select").addEventListener("change", () => {
   state.units.clear(); renderUnitChips();
-  $("var-results").hidden = true; $("unit-results").hidden = true;
+  $("subj-results").hidden = true; $("unit-results").hidden = true;
+  $("facet-panel").hidden = true; facetState = null;
+  if ($("var-search").value.trim().length >= 2) searchSubjects($("var-search").value);
 });
 $("run-btn").addEventListener("click", runQuery);
 $("dl-csv").addEventListener("click", downloadCsv);
@@ -493,7 +623,8 @@ $("toggle-view").addEventListener("click", () => {
   $("toggle-view").textContent = toTable ? "Chart view" : "Table view";
 });
 document.addEventListener("click", ev => {
-  if (!ev.target.closest("#panel-vars")) $("var-results").hidden = true;
+  // keep the subject dropdown open while interacting with the facet panel
+  if (!ev.target.closest("#panel-vars")) $("subj-results").hidden = true;
   if (!ev.target.closest("#panel-scope")) $("unit-results").hidden = true;
 });
 

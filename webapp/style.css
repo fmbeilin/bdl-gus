@@ -130,6 +130,41 @@ input:disabled { opacity: 0.55; }
 .var-row .meta { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 .var-more { padding: 7px 12px; color: var(--text-muted); font-size: 12.5px; }
 
+.quick-starts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.quick-start {
+  font: inherit; font-size: 13px;
+  padding: 5px 12px;
+  border: 1px solid var(--baseline); border-radius: 999px;
+  background: transparent; color: var(--text-secondary);
+  cursor: pointer;
+}
+.quick-start:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-primary); border-color: var(--accent); }
+
+.facet-panel {
+  margin-top: 12px;
+  border: 1px solid var(--accent); border-radius: 9px;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-1));
+}
+.facet-panel .facet-title { font-weight: 650; font-size: 14px; margin-bottom: 2px; }
+.facet-panel .facet-sub { color: var(--text-muted); font-size: 12.5px; margin-bottom: 12px; }
+.facet-grid { display: flex; flex-wrap: wrap; gap: 14px; }
+.facet { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--text-secondary); min-width: 180px; }
+.facet > span { font-weight: 600; }
+.facet select { font: inherit; padding: 7px 10px; border: 1px solid var(--baseline); border-radius: 7px; background: var(--page); color: var(--text-primary); max-width: 320px; }
+.facet-foot { display: flex; align-items: center; gap: 14px; margin-top: 14px; flex-wrap: wrap; }
+.facet-add {
+  font: inherit; font-weight: 650; font-size: 14px;
+  padding: 8px 20px; border: 0; border-radius: 7px;
+  background: var(--accent); color: var(--accent-ink); cursor: pointer;
+}
+.facet-add:disabled { opacity: 0.45; cursor: default; }
+.facet-cancel { font: inherit; font-size: 13px; padding: 8px 12px; border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; text-decoration: underline; }
+.facet-count { font-size: 13px; color: var(--text-secondary); }
+.facet-count strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+.subj-row .subj-meta { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .chip {
   display: inline-flex; align-items: center; gap: 7px;
