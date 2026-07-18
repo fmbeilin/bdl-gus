@@ -20,7 +20,7 @@
   <!-- Step 1: find data (subject-first) -->
   <section class="panel" id="panel-vars">
     <h2><span class="step">1</span> Find data</h2>
-    <input type="search" id="var-search" placeholder="Search a topic in Polish, e.g. ludność, bezrobocie, wynagrodzenia…" autocomplete="off" disabled>
+    <input type="search" id="var-search" placeholder="Search a topic in English or Polish, e.g. population, unemployment, wynagrodzenia…" autocomplete="off" disabled>
     <div id="quick-starts" class="quick-starts"></div>
     <div id="subj-results" class="var-results" hidden></div>
     <div id="facet-panel" class="facet-panel" hidden></div>
@@ -37,11 +37,11 @@
     <div class="field">
       <span>Geographic levels <span class="hint">(tick one or more)</span></span>
       <div id="level-checks" class="level-checks">
-        <label><input type="checkbox" value="gminy" checked> Gminy <span class="lvl-note">municipalities</span></label>
-        <label><input type="checkbox" value="powiaty"> Powiaty <span class="lvl-note">counties</span></label>
-        <label><input type="checkbox" value="podregiony"> Podregiony <span class="lvl-note">subregions</span></label>
-        <label><input type="checkbox" value="wojewodztwa"> Województwa <span class="lvl-note">voivodeships</span></label>
-        <label><input type="checkbox" value="makroregiony"> Makroregiony</label>
+        <label><input type="checkbox" value="gminy" checked> Gminy (LAU-2) <span class="lvl-note">municipalities</span></label>
+        <label><input type="checkbox" value="powiaty"> Powiaty (LAU-1) <span class="lvl-note">counties</span></label>
+        <label><input type="checkbox" value="podregiony"> Podregiony (NUTS-3) <span class="lvl-note">subregions</span></label>
+        <label><input type="checkbox" value="wojewodztwa"> Województwa (NUTS-2) <span class="lvl-note">voivodeships</span></label>
+        <label><input type="checkbox" value="makroregiony"> Makroregiony (NUTS-1)</label>
       </div>
     </div>
     <div class="scope-row">
@@ -78,10 +78,20 @@
     </div>
     <div id="result-summary" class="result-summary"></div>
     <div class="download-bar" id="download-bar">
-      <span class="dl-label">Download</span>
-      <label class="dl-opt"><input type="radio" name="dl-format" value="combined" checked> One file <span class="hint">(level in a column)</span></label>
-      <label class="dl-opt" id="dl-opt-separate"><input type="radio" name="dl-format" value="separate"> Separate file per level <span class="hint">(.zip)</span></label>
-      <button id="dl-csv" class="run-btn dl-btn">Download CSV</button>
+      <div class="dl-group">
+        <span class="dl-label">Layout</span>
+        <label class="dl-opt"><input type="radio" name="dl-layout" value="long" checked> Long <span class="hint">(one row per observation)</span></label>
+        <label class="dl-opt"><input type="radio" name="dl-layout" value="wide"> Wide <span class="hint">(one column per indicator)</span></label>
+      </div>
+      <div class="dl-group">
+        <span class="dl-label">Files</span>
+        <label class="dl-opt"><input type="radio" name="dl-format" value="combined" checked> One file <span class="hint">(level in a column)</span></label>
+        <label class="dl-opt" id="dl-opt-separate"><input type="radio" name="dl-format" value="separate"> Per level <span class="hint">(.zip)</span></label>
+      </div>
+      <div class="dl-group dl-go">
+        <span id="dl-estimate" class="dl-estimate"></span>
+        <button id="dl-csv" class="run-btn dl-btn">Download</button>
+      </div>
     </div>
     <div id="chart-wrap" class="viz-root">
       <div id="chart-note" class="chart-note" hidden></div>
@@ -108,6 +118,6 @@
 
 <!-- Bump ?v= whenever app.js changes so returning visitors don't run a cached
      app.js against fresh HTML (GitHub Pages caches assets ~10 min). -->
-<script type="module" src="app.js?v=3"></script>
+<script type="module" src="app.js?v=4"></script>
 </body>
 </html>

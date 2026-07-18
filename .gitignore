@@ -27,3 +27,7 @@ wykleci_gminy_population.csv
 
 # local claude config
 .claude/
+
+# English metadata fetch outputs (regenerable via fetch_english_meta.py; parquet lives on HF)
+subjects_en.csv
+variables_en.csv

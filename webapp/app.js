@@ -67,14 +67,22 @@ async function init() {
     setStatus("loading", "Loading codebook…");
     // strip_accents leaves Polish ł/Ł untouched (it is not a combining diacritic),
     // so fold it manually — mirrored in normalize() below.
+    // English subject names (from the BDL API, lang=en) enable English search.
+    // Optional file — fall back to Polish-only if it isn't hosted yet.
+    let hasEn = true;
+    try { await conn.query(`CREATE TABLE subjects_en AS SELECT subjectId, name_en FROM read_parquet('${DATA_BASE}/subjects_en.parquet')`); }
+    catch { hasEn = false; }
     await conn.query(`
       CREATE TABLE codebook AS
-      SELECT variable_id, subjectId, subject_name, variable_dimensions,
-             n1, n2, n3, n4, n5,
-             unit_level, measureUnitName, variable_full_name,
-             replace(strip_accents(lower(subject_name || ' ' || coalesce(variable_dimensions,''))), 'ł', 'l') AS search_key,
-             replace(strip_accents(lower(subject_name)), 'ł', 'l') AS subj_norm
-      FROM read_parquet('${DATA_BASE}/codebook.parquet')`);
+      SELECT c.variable_id, c.subjectId, c.subject_name, c.variable_dimensions,
+             c.n1, c.n2, c.n3, c.n4, c.n5,
+             c.unit_level, c.measureUnitName, c.variable_full_name,
+             ${hasEn ? "e.name_en" : "NULL"} AS subject_name_en,
+             replace(strip_accents(lower(c.subject_name || ' ' || coalesce(c.variable_dimensions,''))), 'ł', 'l') AS search_key,
+             replace(strip_accents(lower(c.subject_name)), 'ł', 'l') AS subj_norm,
+             ${hasEn ? "lower(coalesce(e.name_en,''))" : "''"} AS subj_en_norm
+      FROM read_parquet('${DATA_BASE}/codebook.parquet') c
+      ${hasEn ? "LEFT JOIN subjects_en e ON c.subjectId = e.subjectId" : ""}`);
     await conn.query(`
       CREATE TABLE units AS
       SELECT unitId, unitName, unitLevel,
@@ -132,15 +140,33 @@ function renderQuickStarts() {
   }
 }
 
+// Light English suffix stemmer: return the term plus a stem so common word
+// forms match (unemployment→unemploy, dwellings→dwelling, activities→activ…).
+function termVariants(t) {
+  const v = new Set([t]);
+  if (t.length > 5) {
+    if (t.endsWith("ies")) v.add(t.slice(0, -3) + "y");
+    for (const suf of ["ments", "ment", "tions", "tion", "sions", "sion", "ing", "ers", "ed", "es", "s"]) {
+      if (t.endsWith(suf) && t.length - suf.length >= 4) { v.add(t.slice(0, -suf.length)); break; }
+    }
+  }
+  return [...v];
+}
+
 async function searchSubjects(q) {
   const box = $("subj-results");
   $("facet-panel").hidden = true;
   if (q.trim().length < 2) { box.hidden = true; return; }
   const terms = normalize(q).split(/\s+/).filter(Boolean);
-  // Broad filter: all terms appear somewhere (name or a breakdown value).
-  const where = terms.map(t => `search_key LIKE ${sqlQuote("%" + t + "%")}`).join(" AND ");
-  // name_all: every term appears in the SUBJECT NAME (not just a dimension value).
-  const nameAll = terms.map(t => `norm LIKE ${sqlQuote("%" + t + "%")}`).join(" AND ");
+  // Each term matches if any of its variants (the word or a light stem) is a
+  // substring — so English "unemployment" finds "unemployed", "dwellings"
+  // finds "dwelling", etc.
+  const likeAny = (cols, t) =>
+    "(" + termVariants(t).flatMap(v => cols.map(c => `${c} LIKE ${sqlQuote("%" + v + "%")}`)).join(" OR ") + ")";
+  // Broad filter: Polish name/breakdown OR English subject name.
+  const where = terms.map(t => likeAny(["search_key", "subj_en_norm"], t)).join(" AND ");
+  // name_all: every term appears in the SUBJECT NAME (Polish or English).
+  const nameAll = terms.map(t => likeAny(["norm", "en_norm"], t)).join(" AND ");
   // A subject is available at a facts level X iff its unit_level >= X. Across
   // several selected levels, it's relevant if available at any — i.e. the
   // coarsest (smallest code) selected level.
@@ -153,22 +179,24 @@ async function searchSubjects(q) {
     WITH s AS (
       SELECT subjectId,
              any_value(subject_name) AS name,
+             any_value(subject_name_en) AS name_en,
              any_value(subj_norm)   AS norm,
+             any_value(subj_en_norm) AS en_norm,
              count(*)               AS n_vars,
              any_value(measureUnitName) AS unit
       FROM codebook WHERE ${where} AND unit_level >= ${minCode}
       GROUP BY subjectId
     )
-    SELECT subjectId, name, n_vars, unit,
+    SELECT subjectId, name, name_en, n_vars, unit,
       (CASE WHEN ${nameAll} THEN 0 ELSE 1 END) AS name_match,
-      (CASE WHEN norm LIKE ${prefix} THEN 0 ELSE 1 END) AS is_prefix,
+      (CASE WHEN norm LIKE ${prefix} OR en_norm LIKE ${prefix} THEN 0 ELSE 1 END) AS is_prefix,
       (length(name) - length(replace(name, ',', ''))) AS commas,
       length(name) AS namelen
     FROM s ORDER BY name_match, is_prefix, commas, namelen, n_vars DESC LIMIT 40`);
   const rows = res.toArray().map(r => r.toJSON());
   box.innerHTML = "";
   if (!rows.length) {
-    box.innerHTML = `<div class="var-more">No topics match at this level. Search uses Polish topic names (diacritics optional).</div>`;
+    box.innerHTML = `<div class="var-more">No topics match at this level. Try English or Polish keywords (diacritics optional).</div>`;
     box.hidden = false; return;
   }
   // If nothing matches by NAME at this level, the term only appears inside
@@ -186,7 +214,9 @@ async function searchSubjects(q) {
     const b = document.createElement("button");
     b.className = "var-row subj-row"; b.type = "button";
     const breakdowns = r.n_vars > 1 ? `${fmt.format(Number(r.n_vars))} breakdowns` : "single series";
-    b.innerHTML = `<span>${r.name}</span>
+    const en = r.name_en && r.name_en.toLowerCase() !== r.name.toLowerCase()
+      ? `<span class="subj-en">${esc(r.name_en)}</span>` : "";
+    b.innerHTML = `<span class="subj-main">${esc(r.name)}${en}</span>
       <span class="subj-meta">${breakdowns}${r.unit && r.unit !== "-" ? " · " + r.unit : ""}</span>`;
     b.onclick = () => openSubject(r.subjectId, r.name);
     box.appendChild(b);
@@ -204,11 +234,11 @@ function dimLabelsFromName(name, count) {
   return Array.from({ length: count }, (_, i) => count === 1 ? "Breakdown" : `Breakdown ${i + 1}`);
 }
 
-const ALL = "__ALL__";  // sentinel for "all values" (cannot collide with a real dim value)
 function sortVals(vals) {
   return vals.slice().sort((a, b) =>
     a === "ogółem" ? -1 : b === "ogółem" ? 1 : a.localeCompare(b, "pl"));
 }
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 let facetState = null;   // { rows, facets:[{dim,label,values}], name }
 
@@ -231,34 +261,64 @@ async function openSubject(subjectId, name) {
   renderFacetPanel();
 }
 
-function currentSelections() {
-  return facetState.facets.map(f => $(`facet-${f.dim}`).value);
+// Which values are checked for a dimension (multi-select).
+function checkedVals(dim) {
+  return new Set([...document.querySelectorAll(`#facet-list-${dim} input:checked`)].map(c => c.value));
 }
+// Resolved variables = cross-product of the checked values across dimensions.
 function resolveVars() {
-  const sel = currentSelections();
+  const sel = facetState.facets.map(f => checkedVals(f.dim));
   return facetState.rows.filter(r =>
-    facetState.facets.every((f, i) => sel[i] === ALL || r[f.dim] === sel[i]));
+    facetState.facets.every((f, i) => sel[i].has(r[f.dim])));
 }
 
 function renderFacetPanel() {
   const panel = $("facet-panel");
   const { facets, name } = facetState;
   const facetHtml = facets.map(f => {
-    const opts = [`<option value="${ALL}">— all (${f.values.length}) —</option>`]
-      .concat(f.values.map(v => `<option value="${v.replace(/"/g, "&quot;")}"${v === "ogółem" ? " selected" : ""}>${v}</option>`))
-      .join("");
-    return `<label class="facet"><span>${f.label}</span><select id="facet-${f.dim}">${opts}</select></label>`;
+    const withFilter = f.values.length > 8;
+    const items = f.values.map(v =>
+      `<label data-val="${esc(v.toLowerCase())}"><input type="checkbox" value="${esc(v)}"${v === "ogółem" ? " checked" : ""}> ${esc(v)}</label>`
+    ).join("");
+    // if no ogółem, default-check the first value so a selection always resolves
+    const hasTotal = f.values.includes("ogółem");
+    return `<div class="facet"><span>${esc(f.label)} <span class="hint">${f.values.length}</span></span>
+      <div class="facet-ms">
+        <div class="facet-tools">
+          ${withFilter ? `<input class="facet-filter" data-dim="${f.dim}" placeholder="filter ${f.values.length}…">` : ""}
+          <a data-act="all" data-dim="${f.dim}">All</a>
+          <a data-act="none" data-dim="${f.dim}">None</a>
+        </div>
+        <div class="facet-list" id="facet-list-${f.dim}" data-default-first="${hasTotal ? '' : '1'}">${items}</div>
+      </div></div>`;
   }).join("");
   panel.innerHTML = `
-    <div class="facet-title">${name}</div>
-    <div class="facet-sub">${facets.length ? "Choose a breakdown, or “all” for every value. Total (ogółem) is preselected." : "This topic has a single series."}</div>
+    <div class="facet-title">${esc(name)}</div>
+    <div class="facet-sub">${facets.length
+      ? "Tick one or more values in each breakdown — pick several to add a whole family at once. Total (ogółem) is preselected."
+      : "This topic has a single series."}</div>
     ${facets.length ? `<div class="facet-grid">${facetHtml}</div>` : ""}
     <div class="facet-foot">
-      <button class="facet-add" id="facet-add">Add to query</button>
+      <button class="facet-add" id="facet-add">Add to dataset</button>
       <button class="facet-cancel" id="facet-cancel">Cancel</button>
       <span class="facet-count" id="facet-count"></span>
     </div>`;
-  facets.forEach(f => $(`facet-${f.dim}`).addEventListener("change", updateFacetCount));
+  // default-check first value where there's no ogółem
+  facets.forEach(f => {
+    const list = $(`facet-list-${f.dim}`);
+    if (list.dataset.defaultFirst) list.querySelector("input").checked = true;
+    list.addEventListener("change", updateFacetCount);
+  });
+  panel.querySelectorAll(".facet-tools a").forEach(a => a.addEventListener("click", () => {
+    const list = $(`facet-list-${a.dataset.dim}`);
+    list.querySelectorAll("input").forEach(c => { c.checked = a.dataset.act === "all"; });
+    updateFacetCount();
+  }));
+  panel.querySelectorAll(".facet-filter").forEach(inp => inp.addEventListener("input", () => {
+    const q = normalize(inp.value);
+    $(`facet-list-${inp.dataset.dim}`).querySelectorAll("label").forEach(l =>
+      l.classList.toggle("hidden", q && !l.dataset.val.includes(q)));
+  }));
   $("facet-add").addEventListener("click", addFacetSelection);
   $("facet-cancel").addEventListener("click", () => { panel.hidden = true; facetState = null; });
   panel.hidden = false;
@@ -268,16 +328,16 @@ function renderFacetPanel() {
 function updateFacetCount() {
   const n = resolveVars().length;
   const el = $("facet-count");
-  el.innerHTML = `Selects <strong>${fmt.format(n)}</strong> series`;
-  $("facet-add").disabled = n === 0;
-  if (n > MAX_VARS) el.innerHTML += ` — narrow the breakdown (max ${MAX_VARS} per add)`;
+  el.innerHTML = `Adds <strong>${fmt.format(n)}</strong> indicator${n === 1 ? "" : "s"}`;
+  $("facet-add").disabled = n === 0 || n > MAX_VARS;
+  if (n > MAX_VARS) el.innerHTML += ` — too many; narrow to ≤ ${MAX_VARS} per add`;
 }
 
 function addFacetSelection() {
   const resolved = resolveVars();
   if (!resolved.length || resolved.length > MAX_VARS) return;
   if (state.vars.size + resolved.length > MAX_VARS && !resolved.every(r => state.vars.has(Number(r.variable_id)))) {
-    alert(`That would exceed ${MAX_VARS} series. Remove some first.`); return;
+    alert(`That would exceed ${MAX_VARS} indicators in the dataset. Remove some first.`); return;
   }
   for (const r of resolved) {
     state.vars.set(Number(r.variable_id), {
@@ -403,6 +463,7 @@ async function runQuery() {
   try {
     const inner = levels.map(l => levelSelect(l, snap)).join("\nUNION ALL\n");
     const total = Number((await conn.query(`SELECT count(*) AS n FROM (${inner})`)).toArray()[0].toJSON().n);
+    snap.total = total;
     const res = await conn.query(
       `SELECT * FROM (${inner}) ORDER BY variable_id, unitLevel DESC, unitId, year LIMIT ${PREVIEW_LIMIT}`);
     const rows = res.toArray().map(r => r.toJSON());
@@ -416,6 +477,7 @@ async function runQuery() {
     renderTable(rows, total);
     // "separate files" only makes sense with more than one level
     setSeparateEnabled(levels.length > 1);
+    showEstimate(total);
     setStatus("ready", "Ready");
     $("panel-results").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
@@ -432,6 +494,22 @@ function setSeparateEnabled(on) {
   radio.disabled = !on;
   opt.classList.toggle("disabled", !on);
   if (!on && radio.checked) document.querySelector('input[name="dl-format"][value="combined"]').checked = true;
+}
+
+// Estimate export size and flag feasibility. Everything is compiled locally in
+// the browser (no server timeout like the GUS portal) — the real limit is
+// browser memory when building a very large file.
+const HEAVY_ROWS = 3_000_000, WARN_ROWS = 500_000;
+function showEstimate(total) {
+  const el = $("dl-estimate");
+  const bytes = total * 95;                 // ~95 B per long-format row
+  const size = bytes < 1e6 ? `${Math.max(1, Math.round(bytes / 1e3))} KB`
+    : `${(bytes / 1e6).toFixed(bytes < 1e7 ? 1 : 0)} MB`;
+  let cls = "feas-ok", note = "compiles instantly in your browser";
+  if (total > HEAVY_ROWS) { cls = "feas-heavy"; note = "very large — the browser may struggle; narrow units, years, or levels"; }
+  else if (total > WARN_ROWS) { cls = "feas-warn"; note = "large — may take a few seconds to build"; }
+  el.innerHTML = `≈ ${fmt.format(total)} rows · ${size} <span class="${cls}">${note}</span>`;
+  $("dl-csv").disabled = total === 0;
 }
 
 // ---------- chart ----------
@@ -646,12 +724,26 @@ const LEVEL_CASE =
   "CASE d.unitLevel WHEN 6 THEN 'gmina' WHEN 5 THEN 'powiat' WHEN 4 THEN 'podregion' " +
   "WHEN 2 THEN 'wojewodztwo' WHEN 1 THEN 'makroregion' ELSE CAST(d.unitLevel AS VARCHAR) END";
 
-function wrapExport(innerSql) {
+// Long (tidy): one row per observation.
+function wrapExportLong(innerSql) {
   return `WITH d AS (${innerSql}) ` +
     `SELECT d.variable_id, c.variable_full_name AS variable_name, d.unitId, d.unitName, ` +
     `d.unitLevel, ${LEVEL_CASE} AS level, d.year, d.value ` +
     `FROM d LEFT JOIN codebook c USING (variable_id) ` +
     `ORDER BY d.variable_id, d.unitLevel DESC, d.unitId, d.year`;
+}
+// Wide: one column per indicator; rows keyed by unit × year.
+function wrapExportWide(innerSql) {
+  return `PIVOT (WITH d AS (${innerSql}) ` +
+    `SELECT d.unitId, d.unitName, d.unitLevel, ${LEVEL_CASE} AS level, d.year, ` +
+    `c.variable_full_name AS indicator, d.value ` +
+    `FROM d LEFT JOIN codebook c USING (variable_id)) ` +
+    `ON indicator USING first(value) ` +
+    `GROUP BY unitId, unitName, unitLevel, level, year ` +
+    `ORDER BY unitLevel DESC, unitId, year`;
+}
+function wrapExport(innerSql, layout) {
+  return layout === "wide" ? wrapExportWide(innerSql) : wrapExportLong(innerSql);
 }
 
 async function copyToBuffer(sql, fname) {
@@ -673,6 +765,7 @@ async function downloadDataset() {
   const snap = state.snapshot;
   if (!snap) return;
   const format = document.querySelector('input[name="dl-format"]:checked').value;
+  const layout = document.querySelector('input[name="dl-layout"]:checked').value;
   const stamp = new Date().toISOString().slice(0, 10);
   setStatus("busy", "Preparing download…");
   $("dl-csv").disabled = true;
@@ -680,17 +773,17 @@ async function downloadDataset() {
     if (format === "separate" && snap.levels.length > 1) {
       const files = [];
       for (const lvl of snap.levels) {
-        const buf = await copyToBuffer(wrapExport(levelSelect(lvl, snap)), `bdl_${lvl}.csv`);
-        // skip a level that returned only a header (no rows for this cart)
         const rowCount = Number((await conn.query(
           `SELECT count(*) AS n FROM (${levelSelect(lvl, snap)})`)).toArray()[0].toJSON().n);
-        if (rowCount > 0) files.push({ name: `bdl_${lvl}.csv`, data: buf });
+        if (rowCount === 0) continue;   // skip a level with no data for this cart
+        const buf = await copyToBuffer(wrapExport(levelSelect(lvl, snap), layout), `bdl_${lvl}.csv`);
+        files.push({ name: `bdl_${lvl}.csv`, data: buf });
       }
       if (!files.length) { setStatus("ready", "Ready"); return; }
       downloadBlob(makeZip(files), `bdl_dataset_${stamp}.zip`);
     } else {
       const inner = snap.levels.map(l => levelSelect(l, snap)).join("\nUNION ALL\n");
-      const buf = await copyToBuffer(wrapExport(inner), "bdl_export.csv");
+      const buf = await copyToBuffer(wrapExport(inner, layout), "bdl_export.csv");
       downloadBlob(new Blob([buf], { type: "text/csv;charset=utf-8" }), `bdl_dataset_${stamp}.csv`);
     }
     setStatus("ready", "Ready");
