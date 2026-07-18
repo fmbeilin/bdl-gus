@@ -27,21 +27,29 @@ function filesFor(level, varIds) {
   return (hit.length ? hit : entries).map(e => `${DATA_BASE}/${e.file}`);
 }
 const LEVEL_CODES = { gminy: 6, powiaty: 5, podregiony: 4, wojewodztwa: 2, makroregiony: 1 };
+const LEVEL_LABEL = { gminy: "Gminy", powiaty: "Powiaty", podregiony: "Podregiony", wojewodztwa: "Województwa", makroregiony: "Makroregiony" };
+const LEVEL_SHORT = { 6: "gmina", 5: "powiat", 4: "podregion", 2: "woj.", 1: "makro" };
+const LEVEL_NAME = { 6: "gmina", 5: "powiat", 4: "podregion", 2: "wojewodztwo", 1: "makroregion" };
 const MAX_SERIES = 8;
+const PREVIEW_LIMIT = 3000;
 const SERIES_VARS = [1, 2, 3, 4, 5, 6, 7, 8].map(i => `var(--series-${i})`);
+
+function selectedLevels() {
+  return [...document.querySelectorAll("#level-checks input:checked")].map(c => c.value);
+}
 
 const $ = id => document.getElementById(id);
 const statusEl = $("status");
 function setStatus(cls, msg) { statusEl.className = `status status-${cls}`; statusEl.textContent = msg; }
 
 const state = {
-  vars: new Map(),   // variable_id -> {id, name, unitName (measure), level}
-  units: new Map(),  // unitId -> {id, name}
-  lastResult: null,  // {rows, columns, truncated, total}
+  vars: new Map(),   // variable_id -> {id, name, measure}
+  units: new Map(),  // unitId -> {id, name, level}
+  snapshot: null,    // {levels, varKeys, where} captured at Build time
   view: "chart",
 };
 
-let conn;
+let conn, db;
 
 // ---------- bootstrap ----------
 async function init() {
@@ -51,7 +59,7 @@ async function init() {
     const workerUrl = URL.createObjectURL(
       new Blob([`importScripts("${bundle.mainWorker}");`], { type: "text/javascript" }));
     const worker = new Worker(workerUrl);
-    const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING), worker);
+    db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING), worker);
     await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
     URL.revokeObjectURL(workerUrl);
     conn = await db.connect();
@@ -77,7 +85,7 @@ async function init() {
       manifest = await (await fetch(`${DATA_BASE}/manifest.json`, { cache: "no-cache" })).json();
     } catch { manifest = null; }       // older single-file layout still works
 
-    window.__bdl = { conn, duckdb };   // console debugging hook
+    window.__bdl = { conn, db, duckdb };   // console debugging hook
     renderQuickStarts();
     $("var-search").disabled = false;
     $("unit-search").disabled = false;
@@ -133,7 +141,11 @@ async function searchSubjects(q) {
   const where = terms.map(t => `search_key LIKE ${sqlQuote("%" + t + "%")}`).join(" AND ");
   // name_all: every term appears in the SUBJECT NAME (not just a dimension value).
   const nameAll = terms.map(t => `norm LIKE ${sqlQuote("%" + t + "%")}`).join(" AND ");
-  const lvl = LEVEL_CODES[$("level-select").value];
+  // A subject is available at a facts level X iff its unit_level >= X. Across
+  // several selected levels, it's relevant if available at any — i.e. the
+  // coarsest (smallest code) selected level.
+  const lvls = selectedLevels();
+  const minCode = lvls.length ? Math.min(...lvls.map(l => LEVEL_CODES[l])) : 1;
   const prefix = sqlQuote(normalize(q) + "%");
   // One row per subject (concept). Rank: name matches above dimension-only
   // matches, then prefix hits, then simpler (shorter, fewer-qualifier) names.
@@ -144,7 +156,7 @@ async function searchSubjects(q) {
              any_value(subj_norm)   AS norm,
              count(*)               AS n_vars,
              any_value(measureUnitName) AS unit
-      FROM codebook WHERE ${where} AND unit_level >= ${lvl}
+      FROM codebook WHERE ${where} AND unit_level >= ${minCode}
       GROUP BY subjectId
     )
     SELECT subjectId, name, n_vars, unit,
@@ -162,11 +174,11 @@ async function searchSubjects(q) {
   // If nothing matches by NAME at this level, the term only appears inside
   // breakdowns — usually because the topic isn't collected at this level.
   if (Number(rows[0].name_match) === 1) {
-    const levelName = $("level-select").selectedOptions[0].text;
+    const levelName = lvls.length === 1 ? LEVEL_LABEL[lvls[0]] : "the selected levels";
     const h = document.createElement("div");
     h.className = "var-more";
-    h.innerHTML = `No topic is named “${normalize(q)}” at <strong>${levelName}</strong> level — ` +
-      `it may be collected only at a higher level (try powiat or województwo). ` +
+    h.innerHTML = `No topic is named “${normalize(q)}” at <strong>${levelName}</strong> — ` +
+      `it may be collected only at another level (e.g. wages are powiat-and-up). ` +
       `The topics below just mention it inside a breakdown.`;
     box.appendChild(h);
   }
@@ -287,23 +299,27 @@ async function searchUnits(q) {
   if (q.trim().length < 2) { box.hidden = true; return; }
   const terms = normalize(q).split(/\s+/).filter(Boolean);
   const where = terms.map(t => `search_key LIKE ${sqlQuote("%" + t + "%")}`).join(" AND ");
-  const lvl = LEVEL_CODES[$("level-select").value];
+  const lvls = selectedLevels();
+  if (!lvls.length) { box.innerHTML = `<div class="var-more">Tick a geographic level first.</div>`; box.hidden = false; return; }
+  const codes = lvls.map(l => LEVEL_CODES[l]);
+  const multiLvl = codes.length > 1;
   const res = await conn.query(`
-    SELECT unitId, unitName FROM units
-    WHERE ${where} AND unitLevel = ${lvl}
-    ORDER BY unitName LIMIT 100`);
+    SELECT unitId, unitName, unitLevel FROM units
+    WHERE ${where} AND unitLevel IN (${codes.join(",")})
+    ORDER BY unitLevel DESC, unitName LIMIT 100`);
   const rows = res.toArray().map(r => r.toJSON());
   box.innerHTML = "";
   if (!rows.length) {
-    box.innerHTML = `<div class="var-more">No units match at this level.</div>`;
+    box.innerHTML = `<div class="var-more">No units match at the selected level(s).</div>`;
     box.hidden = false; return;
   }
   for (const r of rows) {
+    const lvlTag = multiLvl ? ` · ${LEVEL_SHORT[r.unitLevel]}` : "";
     const b = document.createElement("button");
     b.className = "var-row"; b.type = "button";
-    b.innerHTML = `<span>${r.unitName}</span><span class="meta">${r.unitId}</span>`;
+    b.innerHTML = `<span>${r.unitName}</span><span class="meta">${r.unitId}${lvlTag}</span>`;
     b.onclick = () => {
-      state.units.set(r.unitId, { id: r.unitId, name: r.unitName });
+      state.units.set(r.unitId, { id: r.unitId, name: r.unitName, level: Number(r.unitLevel) });
       renderUnitChips();
       box.hidden = true; $("unit-search").value = "";
     };
@@ -315,10 +331,12 @@ async function searchUnits(q) {
 function renderUnitChips() {
   const wrap = $("unit-chips");
   wrap.innerHTML = "";
+  const multiLvl = selectedLevels().length > 1;
   for (const [id, u] of state.units) {
     const c = document.createElement("span");
     c.className = "chip";
-    c.innerHTML = `<span class="chip-label">${u.name}</span>`;
+    const tag = multiLvl && u.level ? ` <span class="hint">${LEVEL_SHORT[u.level]}</span>` : "";
+    c.innerHTML = `<span class="chip-label">${u.name}${tag}</span>`;
     const x = document.createElement("button");
     x.textContent = "×"; x.title = "Remove"; x.setAttribute("aria-label", `Remove ${u.name}`);
     x.onclick = () => { state.units.delete(id); renderUnitChips(); };
@@ -343,9 +361,16 @@ function renderChips(elId, map) {
 }
 
 function updateRunState() {
-  const ok = state.vars.size > 0 && conn;
+  // cart header
+  const n = state.vars.size;
+  $("cart-head").hidden = n === 0;
+  $("cart-count").textContent = n === 1 ? "Your dataset: 1 variable" : `Your dataset: ${n} variables`;
+  // run button
+  const hasLevel = selectedLevels().length > 0;
+  const ok = n > 0 && hasLevel && conn;
   $("run-btn").disabled = !ok;
-  $("run-note").textContent = ok ? "" : "Pick at least one variable.";
+  $("run-note").textContent = !conn ? "" : n === 0 ? "Add at least one variable to your dataset."
+    : !hasLevel ? "Tick at least one geographic level." : "";
 }
 
 // ---------- query ----------
@@ -358,45 +383,66 @@ function buildWhere() {
   return parts.join(" AND ");
 }
 
-async function runQuery() {
-  const level = $("level-select").value;
-  const files = filesFor(level, [...state.vars.keys()]);
+// One level's raw SELECT over its parquet part-files, honoring the snapshot's
+// variable/unit/year filters. unitLevel is carried through from the data.
+function levelSelect(level, snap) {
+  const files = filesFor(level, snap.varKeys);
   const fileListSql = `[${files.map(sqlQuote).join(",")}]`;
-  const where = buildWhere();
-  setStatus("busy", "Querying…");
+  return `SELECT variable_id, unitId, unitName, unitLevel, year, value ` +
+    `FROM read_parquet(${fileListSql}) WHERE ${snap.where}`;
+}
+
+async function runQuery() {
+  const levels = selectedLevels();
+  if (!state.vars.size || !levels.length) return;
+  const snap = { levels, varKeys: [...state.vars.keys()], where: buildWhere() };
+  state.snapshot = snap;
+  setStatus("busy", "Building dataset…");
   $("run-btn").disabled = true;
   const t0 = performance.now();
   try {
-    const res = await conn.query(`
-      SELECT variable_id, unitId, unitName, year, value
-      FROM read_parquet(${fileListSql})
-      WHERE ${where}
-      ORDER BY variable_id, unitId, year`);
+    const inner = levels.map(l => levelSelect(l, snap)).join("\nUNION ALL\n");
+    const total = Number((await conn.query(`SELECT count(*) AS n FROM (${inner})`)).toArray()[0].toJSON().n);
+    const res = await conn.query(
+      `SELECT * FROM (${inner}) ORDER BY variable_id, unitLevel DESC, unitId, year LIMIT ${PREVIEW_LIMIT}`);
     const rows = res.toArray().map(r => r.toJSON());
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
-    state.lastResult = { rows, level };
     $("panel-results").hidden = false;
+    const lvlLabel = levels.length === 1 ? LEVEL_LABEL[levels[0]] : `${levels.length} levels`;
     $("result-summary").textContent =
-      `${fmt.format(rows.length)} observations · ${state.vars.size} variable${state.vars.size > 1 ? "s" : ""} · ` +
-      `${state.units.size || "all"} unit${state.units.size === 1 ? "" : "s"} · ${secs}s`;
+      `${fmt.format(total)} observations · ${state.vars.size} variable${state.vars.size > 1 ? "s" : ""} · ` +
+      `${lvlLabel} · ${state.units.size || "all"} unit${state.units.size === 1 ? "" : "s"} · ${secs}s`;
     renderChart(rows);
-    renderTable(rows);
+    renderTable(rows, total);
+    // "separate files" only makes sense with more than one level
+    setSeparateEnabled(levels.length > 1);
     setStatus("ready", "Ready");
     $("panel-results").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
     console.error(err);
-    setStatus("error", `Query failed: ${err.message}`);
+    setStatus("error", `Build failed: ${err.message}`);
   } finally {
     updateRunState();
   }
 }
 
+function setSeparateEnabled(on) {
+  const opt = $("dl-opt-separate");
+  const radio = opt.querySelector("input");
+  radio.disabled = !on;
+  opt.classList.toggle("disabled", !on);
+  if (!on && radio.checked) document.querySelector('input[name="dl-format"][value="combined"]').checked = true;
+}
+
 // ---------- chart ----------
-function seriesKey(r) { return `${r.variable_id}|${r.unitId}`; }
+function seriesKey(r) { return `${r.variable_id}|${r.unitId}|${r.unitLevel}`; }
 function seriesName(r) {
   const v = state.vars.get(Number(r.variable_id));
-  const varPart = state.vars.size > 1 ? `${v ? v.name : r.variable_id}` : null;
-  return [r.unitName, varPart].filter(Boolean).join(" — ");
+  const multiLvl = (state.snapshot?.levels.length || 1) > 1;
+  const parts = [r.unitName];
+  if (multiLvl) parts.push(LEVEL_SHORT[r.unitLevel]);
+  if (state.vars.size > 1) parts.push(v ? v.name : r.variable_id);
+  return parts.filter(Boolean).join(" — ");
 }
 
 function renderChart(rows) {
@@ -574,47 +620,143 @@ const truncate = (s, n) => s.length > n ? s.slice(0, n - 1) + "…" : s;
 
 // ---------- table ----------
 const TABLE_LIMIT = 1000;
-function renderTable(rows) {
+function renderTable(rows, total) {
   const tbl = $("result-table");
   const shown = rows.slice(0, TABLE_LIMIT);
+  const multiLvl = (state.snapshot?.levels.length || 1) > 1;
   const varName = id => { const v = state.vars.get(Number(id)); return v ? v.name : id; };
-  tbl.innerHTML = `<thead><tr><th>Variable</th><th>Unit</th><th>Unit&nbsp;ID</th><th>Year</th><th>Value</th></tr></thead>` +
+  const lvlHead = multiLvl ? "<th>Level</th>" : "";
+  tbl.innerHTML =
+    `<thead><tr><th>Variable</th><th>Unit</th><th>Unit&nbsp;ID</th>${lvlHead}<th>Year</th><th>Value</th></tr></thead>` +
     `<tbody>` + shown.map(r =>
       `<tr><td>${truncate(varName(r.variable_id), 70)}</td><td>${r.unitName}</td><td>${r.unitId}</td>` +
+      `${multiLvl ? `<td>${LEVEL_NAME[r.unitLevel] || r.unitLevel}</td>` : ""}` +
       `<td class="num">${r.year}</td><td class="num">${fmtVal(r.value)}</td></tr>`).join("") + `</tbody>`;
-  $("table-note").textContent = rows.length > TABLE_LIMIT
-    ? `Showing first ${fmt.format(TABLE_LIMIT)} of ${fmt.format(rows.length)} rows — download the CSV for all of them.`
+  total = total ?? rows.length;
+  $("table-note").textContent = total > shown.length
+    ? `Showing first ${fmt.format(shown.length)} of ${fmt.format(total)} rows — download for the full dataset.`
     : "";
 }
 
-// ---------- CSV download ----------
-function downloadCsv() {
-  const res = state.lastResult;
-  if (!res) return;
-  const varName = id => { const v = state.vars.get(Number(id)); return v ? v.name : id; };
-  const esc = s => { s = String(s ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  const head = "variable_id,variable_name,unitId,unitName,year,value";
-  const body = res.rows.map(r =>
-    [r.variable_id, esc(varName(r.variable_id)), `="${r.unitId}"`, esc(r.unitName), r.year, r.value ?? ""].join(","));
-  const blob = new Blob(["﻿" + head + "\n" + body.join("\n")], { type: "text/csv;charset=utf-8" });
+// ---------- dataset download ----------
+// Generated in DuckDB via COPY (streams to the virtual FS) so large exports
+// don't have to be built as one giant string in JS. unitId stays a string, so
+// leading zeros survive for R/Python/pandas.
+const LEVEL_CASE =
+  "CASE d.unitLevel WHEN 6 THEN 'gmina' WHEN 5 THEN 'powiat' WHEN 4 THEN 'podregion' " +
+  "WHEN 2 THEN 'wojewodztwo' WHEN 1 THEN 'makroregion' ELSE CAST(d.unitLevel AS VARCHAR) END";
+
+function wrapExport(innerSql) {
+  return `WITH d AS (${innerSql}) ` +
+    `SELECT d.variable_id, c.variable_full_name AS variable_name, d.unitId, d.unitName, ` +
+    `d.unitLevel, ${LEVEL_CASE} AS level, d.year, d.value ` +
+    `FROM d LEFT JOIN codebook c USING (variable_id) ` +
+    `ORDER BY d.variable_id, d.unitLevel DESC, d.unitId, d.year`;
+}
+
+async function copyToBuffer(sql, fname) {
+  await conn.query(`COPY (${sql}) TO '${fname}' (HEADER, DELIMITER ',')`);
+  const buf = await db.copyFileToBuffer(fname);
+  await db.dropFile(fname).catch(() => {});
+  return buf;
+}
+
+function downloadBlob(blob, name) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `bdl_${res.level}_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = name;
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+async function downloadDataset() {
+  const snap = state.snapshot;
+  if (!snap) return;
+  const format = document.querySelector('input[name="dl-format"]:checked').value;
+  const stamp = new Date().toISOString().slice(0, 10);
+  setStatus("busy", "Preparing download…");
+  $("dl-csv").disabled = true;
+  try {
+    if (format === "separate" && snap.levels.length > 1) {
+      const files = [];
+      for (const lvl of snap.levels) {
+        const buf = await copyToBuffer(wrapExport(levelSelect(lvl, snap)), `bdl_${lvl}.csv`);
+        // skip a level that returned only a header (no rows for this cart)
+        const rowCount = Number((await conn.query(
+          `SELECT count(*) AS n FROM (${levelSelect(lvl, snap)})`)).toArray()[0].toJSON().n);
+        if (rowCount > 0) files.push({ name: `bdl_${lvl}.csv`, data: buf });
+      }
+      if (!files.length) { setStatus("ready", "Ready"); return; }
+      downloadBlob(makeZip(files), `bdl_dataset_${stamp}.zip`);
+    } else {
+      const inner = snap.levels.map(l => levelSelect(l, snap)).join("\nUNION ALL\n");
+      const buf = await copyToBuffer(wrapExport(inner), "bdl_export.csv");
+      downloadBlob(new Blob([buf], { type: "text/csv;charset=utf-8" }), `bdl_dataset_${stamp}.csv`);
+    }
+    setStatus("ready", "Ready");
+  } catch (err) {
+    console.error(err);
+    setStatus("error", `Download failed: ${err.message}`);
+  } finally {
+    $("dl-csv").disabled = false;
+  }
+}
+
+// Minimal store-only (uncompressed) ZIP writer — no dependencies.
+function crc32(bytes) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) {
+    crc ^= bytes[i];
+    for (let k = 0; k < 8; k++) crc = crc & 1 ? (crc >>> 1) ^ 0xEDB88320 : crc >>> 1;
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function makeZip(files) {
+  const enc = new TextEncoder();
+  const u16 = n => [n & 0xff, (n >>> 8) & 0xff];
+  const u32 = n => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff];
+  const parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const nb = enc.encode(f.name), crc = crc32(f.data), sz = f.data.length;
+    const local = [0x50, 0x4b, 0x03, 0x04, ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+      ...u32(crc), ...u32(sz), ...u32(sz), ...u16(nb.length), ...u16(0)];
+    parts.push(new Uint8Array(local), nb, f.data);
+    central.push({ nb, crc, sz, offset });
+    offset += local.length + nb.length + sz;
+  }
+  const cdStart = offset;
+  for (const c of central) {
+    const h = [0x50, 0x4b, 0x01, 0x02, ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+      ...u32(c.crc), ...u32(c.sz), ...u32(c.sz), ...u16(c.nb.length), ...u16(0), ...u16(0), ...u16(0),
+      ...u16(0), ...u32(0), ...u32(c.offset)];
+    parts.push(new Uint8Array(h), c.nb);
+    offset += h.length + c.nb.length;
+  }
+  const eocd = [0x50, 0x4b, 0x05, 0x06, ...u16(0), ...u16(0), ...u16(central.length), ...u16(central.length),
+    ...u32(offset - cdStart), ...u32(cdStart), ...u16(0)];
+  parts.push(new Uint8Array(eocd));
+  return new Blob(parts, { type: "application/zip" });
 }
 
 // ---------- wire up ----------
 $("var-search").addEventListener("input", debounce(e => searchSubjects(e.target.value), 200));
 $("unit-search").addEventListener("input", debounce(e => searchUnits(e.target.value), 200));
-$("level-select").addEventListener("change", () => {
-  state.units.clear(); renderUnitChips();
+$("level-checks").addEventListener("change", () => {
+  // units are level-specific — drop any that no longer match a selected level
+  const codes = new Set(selectedLevels().map(l => LEVEL_CODES[l]));
+  for (const [id, u] of state.units) if (u.level && !codes.has(u.level)) state.units.delete(id);
+  renderUnitChips();
   $("subj-results").hidden = true; $("unit-results").hidden = true;
   $("facet-panel").hidden = true; facetState = null;
+  updateRunState();
   if ($("var-search").value.trim().length >= 2) searchSubjects($("var-search").value);
 });
+$("cart-clear").addEventListener("click", () => {
+  state.vars.clear(); renderChips("var-chips", state.vars); updateRunState();
+});
 $("run-btn").addEventListener("click", runQuery);
-$("dl-csv").addEventListener("click", downloadCsv);
+$("dl-csv").addEventListener("click", downloadDataset);
 $("toggle-view").addEventListener("click", () => {
   const toTable = $("table-wrap").hidden;
   $("table-wrap").hidden = !toTable;

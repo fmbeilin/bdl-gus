@@ -24,23 +24,27 @@
     <div id="quick-starts" class="quick-starts"></div>
     <div id="subj-results" class="var-results" hidden></div>
     <div id="facet-panel" class="facet-panel" hidden></div>
+    <div class="cart-head" id="cart-head" hidden>
+      <span id="cart-count">Your dataset</span>
+      <button id="cart-clear" class="cart-clear" type="button">Clear all</button>
+    </div>
     <div id="var-chips" class="chips"></div>
   </section>
 
   <!-- Step 2: scope -->
   <section class="panel" id="panel-scope">
     <h2><span class="step">2</span> Choose scope</h2>
+    <div class="field">
+      <span>Geographic levels <span class="hint">(tick one or more)</span></span>
+      <div id="level-checks" class="level-checks">
+        <label><input type="checkbox" value="gminy" checked> Gminy <span class="lvl-note">municipalities</span></label>
+        <label><input type="checkbox" value="powiaty"> Powiaty <span class="lvl-note">counties</span></label>
+        <label><input type="checkbox" value="podregiony"> Podregiony <span class="lvl-note">subregions</span></label>
+        <label><input type="checkbox" value="wojewodztwa"> Województwa <span class="lvl-note">voivodeships</span></label>
+        <label><input type="checkbox" value="makroregiony"> Makroregiony</label>
+      </div>
+    </div>
     <div class="scope-row">
-      <label class="field">
-        <span>Level</span>
-        <select id="level-select">
-          <option value="gminy" selected>Gminy (municipalities)</option>
-          <option value="powiaty">Powiaty (counties)</option>
-          <option value="podregiony">Podregiony (subregions)</option>
-          <option value="wojewodztwa">Województwa (voivodeships)</option>
-          <option value="makroregiony">Makroregiony</option>
-        </select>
-      </label>
       <label class="field">
         <span>Years</span>
         <span class="year-pair">
@@ -51,7 +55,7 @@
       </label>
     </div>
     <label class="field">
-      <span>Units <span class="hint">(empty = all units at this level)</span></span>
+      <span>Units <span class="hint">(empty = all units at the selected levels)</span></span>
       <input type="search" id="unit-search" placeholder="Search units, e.g. Bochnia, Kraków…" autocomplete="off" disabled>
     </label>
     <div id="unit-results" class="var-results" hidden></div>
@@ -60,20 +64,25 @@
 
   <!-- Step 3: run -->
   <section class="panel panel-run">
-    <button id="run-btn" class="run-btn" disabled>Fetch data</button>
+    <button id="run-btn" class="run-btn" disabled>Build dataset</button>
     <span id="run-note" class="hint"></span>
   </section>
 
   <!-- Results -->
   <section class="panel" id="panel-results" hidden>
     <div class="results-head">
-      <h2 id="results-title">Results</h2>
+      <h2 id="results-title">Your dataset</h2>
       <div class="results-actions">
         <button id="toggle-view" class="ghost-btn" aria-pressed="false">Table view</button>
-        <button id="dl-csv" class="ghost-btn">Download CSV</button>
       </div>
     </div>
     <div id="result-summary" class="result-summary"></div>
+    <div class="download-bar" id="download-bar">
+      <span class="dl-label">Download</span>
+      <label class="dl-opt"><input type="radio" name="dl-format" value="combined" checked> One file <span class="hint">(level in a column)</span></label>
+      <label class="dl-opt" id="dl-opt-separate"><input type="radio" name="dl-format" value="separate"> Separate file per level <span class="hint">(.zip)</span></label>
+      <button id="dl-csv" class="run-btn dl-btn">Download CSV</button>
+    </div>
     <div id="chart-wrap" class="viz-root">
       <div id="chart-note" class="chart-note" hidden></div>
       <div id="chart"></div>
@@ -99,6 +108,6 @@
 
 <!-- Bump ?v= whenever app.js changes so returning visitors don't run a cached
      app.js against fresh HTML (GitHub Pages caches assets ~10 min). -->
-<script type="module" src="app.js?v=2"></script>
+<script type="module" src="app.js?v=3"></script>
 </body>
 </html>
