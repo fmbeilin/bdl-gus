@@ -84,9 +84,12 @@
         <label class="dl-opt"><input type="radio" name="dl-layout" value="wide"> Wide <span class="hint">(one column per indicator)</span></label>
       </div>
       <div class="dl-group">
-        <span class="dl-label">Files</span>
+        <span class="dl-label">Data files</span>
         <label class="dl-opt"><input type="radio" name="dl-format" value="combined" checked> One file <span class="hint">(level in a column)</span></label>
-        <label class="dl-opt" id="dl-opt-separate"><input type="radio" name="dl-format" value="separate"> Per level <span class="hint">(.zip)</span></label>
+        <label class="dl-opt" id="dl-opt-separate"><input type="radio" name="dl-format" value="separate"> Per level</label>
+      </div>
+      <div class="dl-group">
+        <label class="dl-opt"><input type="checkbox" id="dl-docs" checked> Include codebook &amp; README <span class="hint">(as .zip)</span></label>
       </div>
       <div class="dl-group dl-go">
         <span id="dl-estimate" class="dl-estimate"></span>
@@ -118,6 +121,6 @@
 
 <!-- Bump ?v= whenever app.js changes so returning visitors don't run a cached
      app.js against fresh HTML (GitHub Pages caches assets ~10 min). -->
-<script type="module" src="app.js?v=4"></script>
+<script type="module" src="app.js?v=5"></script>
 </body>
 </html>

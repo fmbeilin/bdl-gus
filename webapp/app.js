@@ -761,30 +761,102 @@ function downloadBlob(blob, name) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+// Per-variable documentation (PL + EN names, subject, breakdown, unit, level).
+function codebookSql(snap) {
+  return `SELECT variable_id, variable_full_name AS variable_name, ` +
+    `subject_name AS subject_pl, subject_name_en AS subject_en, ` +
+    `variable_dimensions AS breakdown, measureUnitName AS measure_unit, ` +
+    `CASE unit_level WHEN 6 THEN 'gmina' WHEN 5 THEN 'powiat' WHEN 4 THEN 'podregion' ` +
+    `WHEN 3 THEN 'region' WHEN 2 THEN 'wojewodztwo' WHEN 1 THEN 'makroregion' WHEN 0 THEN 'Polska' ` +
+    `ELSE CAST(unit_level AS VARCHAR) END AS lowest_level, subjectId ` +
+    `FROM codebook WHERE variable_id IN (${snap.varKeys.join(",")}) ORDER BY variable_id`;
+}
+
+function buildReadme(snap, layout, stamp, dataFileList) {
+  const lvlNames = snap.levels.map(l => LEVEL_LABEL[l]).join(", ");
+  const unitDesc = state.units.size
+    ? [...state.units.values()].map(u => u.name).join("; ")
+    : "all units at the selected level(s)";
+  const yf = parseInt($("year-from").value, 10), yt = parseInt($("year-to").value, 10);
+  const yearDesc = Number.isNaN(yf) && Number.isNaN(yt) ? "all available years"
+    : `${Number.isNaN(yf) ? "earliest" : yf}–${Number.isNaN(yt) ? "latest" : yt}`;
+  const dataCols = layout === "wide"
+    ? `  unitId        GUS territorial unit code (TERYT-style, 12 chars — keep as text; leading zeros matter)
+  unitName      Territorial unit name
+  unitLevel     6=gmina, 5=powiat, 4=podregion, 2=wojewodztwo, 1=makroregion
+  level         Readable level name
+  year          Year
+  <indicator…>  One column per indicator; the header is the full indicator name (see codebook.csv)`
+    : `  variable_id   GUS variable id (join key to codebook.csv)
+  variable_name Full indicator name (Polish)
+  unitId        GUS territorial unit code (TERYT-style, 12 chars — keep as text; leading zeros matter)
+  unitName      Territorial unit name
+  unitLevel     6=gmina, 5=powiat, 4=podregion, 2=wojewodztwo, 1=makroregion
+  level         Readable level name
+  year          Year
+  value         Observed value`;
+  return `GUS BDL — custom dataset
+Generated ${stamp} with the GUS BDL Explorer
+https://fmbeilin.github.io/bdl-gus/webapp/
+
+CONTENTS
+${dataFileList.map(f => `  ${f.padEnd(16)}data (${layout} format)`).join("\n")}
+  codebook.csv    documentation — one row per indicator (PL + EN names, subject, breakdown, unit of measure, lowest available level)
+  README.txt      this file
+
+SCOPE
+  Indicators:        ${snap.varKeys.length}
+  Geographic levels: ${lvlNames}
+  Units:             ${unitDesc}
+  Years:             ${yearDesc}
+  Rows (data):       ${fmt.format(snap.total ?? 0)}
+
+DATA COLUMNS (${layout})
+${dataCols}
+
+SOURCE
+  Statistics Poland (Główny Urząd Statystyczny), Bank Danych Lokalnych
+  https://bdl.stat.gov.pl — data reusable with attribution to GUS, retrieved via the BDL API.
+  Assembled with an independent tool, not affiliated with or endorsed by GUS.
+`;
+}
+
 async function downloadDataset() {
   const snap = state.snapshot;
   if (!snap) return;
   const format = document.querySelector('input[name="dl-format"]:checked').value;
   const layout = document.querySelector('input[name="dl-layout"]:checked').value;
+  const withDocs = $("dl-docs").checked;
   const stamp = new Date().toISOString().slice(0, 10);
   setStatus("busy", "Preparing download…");
   $("dl-csv").disabled = true;
   try {
+    // Build the data file(s): one combined, or one per non-empty level.
+    const dataFiles = [];
     if (format === "separate" && snap.levels.length > 1) {
-      const files = [];
       for (const lvl of snap.levels) {
         const rowCount = Number((await conn.query(
           `SELECT count(*) AS n FROM (${levelSelect(lvl, snap)})`)).toArray()[0].toJSON().n);
         if (rowCount === 0) continue;   // skip a level with no data for this cart
-        const buf = await copyToBuffer(wrapExport(levelSelect(lvl, snap), layout), `bdl_${lvl}.csv`);
-        files.push({ name: `bdl_${lvl}.csv`, data: buf });
+        const buf = await copyToBuffer(wrapExport(levelSelect(lvl, snap), layout), `data_${lvl}.csv`);
+        dataFiles.push({ name: `data_${lvl}.csv`, data: buf });
       }
-      if (!files.length) { setStatus("ready", "Ready"); return; }
-      downloadBlob(makeZip(files), `bdl_dataset_${stamp}.zip`);
     } else {
       const inner = snap.levels.map(l => levelSelect(l, snap)).join("\nUNION ALL\n");
-      const buf = await copyToBuffer(wrapExport(inner, layout), "bdl_export.csv");
-      downloadBlob(new Blob([buf], { type: "text/csv;charset=utf-8" }), `bdl_dataset_${stamp}.csv`);
+      const buf = await copyToBuffer(wrapExport(inner, layout), "data.csv");
+      dataFiles.push({ name: "data.csv", data: buf });
+    }
+    if (!dataFiles.length) { setStatus("ready", "Ready"); return; }
+
+    if (withDocs) {
+      const codebook = await copyToBuffer(codebookSql(snap), "codebook.csv");
+      const readme = new TextEncoder().encode(buildReadme(snap, layout, stamp, dataFiles.map(f => f.name)));
+      const zip = makeZip([...dataFiles, { name: "codebook.csv", data: codebook }, { name: "README.txt", data: readme }]);
+      downloadBlob(zip, `bdl_dataset_${stamp}.zip`);
+    } else if (dataFiles.length === 1) {
+      downloadBlob(new Blob([dataFiles[0].data], { type: "text/csv;charset=utf-8" }), `bdl_dataset_${stamp}.csv`);
+    } else {
+      downloadBlob(makeZip(dataFiles), `bdl_dataset_${stamp}.zip`);
     }
     setStatus("ready", "Ready");
   } catch (err) {
