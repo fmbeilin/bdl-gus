@@ -11,52 +11,58 @@
 <header class="topbar">
   <div class="topbar-inner">
     <h1>GUS BDL Explorer</h1>
-    <p class="tagline">Polish Local Data Bank — 1.26 billion observations, queried live in your browser</p>
+    <p class="tagline" data-i18n="tagline">Polish Local Data Bank — 1.26 billion observations, queried live in your browser</p>
   </div>
-  <div id="status" class="status status-loading">Starting DuckDB…</div>
+  <div class="topbar-right">
+    <div class="lang-toggle" role="group" aria-label="Language">
+      <button type="button" data-lang-btn="en">EN</button>
+      <button type="button" data-lang-btn="pl">PL</button>
+    </div>
+    <div id="status" class="status status-loading" data-i18n="st_starting">Starting DuckDB…</div>
+  </div>
 </header>
 
 <main>
   <!-- Step 1: find data (subject-first) -->
   <section class="panel" id="panel-vars">
-    <h2><span class="step">1</span> Find data</h2>
-    <input type="search" id="var-search" placeholder="Search a topic in English or Polish, e.g. population, unemployment, wynagrodzenia…" autocomplete="off" disabled>
+    <h2><span class="step">1</span> <span data-i18n="find_data">Find data</span></h2>
+    <input type="search" id="var-search" data-i18n-ph="search_ph" placeholder="Search a topic in English or Polish…" autocomplete="off" disabled>
     <div id="quick-starts" class="quick-starts"></div>
     <div id="subj-results" class="var-results" hidden></div>
     <div id="facet-panel" class="facet-panel" hidden></div>
     <div class="cart-head" id="cart-head" hidden>
       <span id="cart-count">Your dataset</span>
-      <button id="cart-clear" class="cart-clear" type="button">Clear all</button>
+      <button id="cart-clear" class="cart-clear" type="button" data-i18n="clear_all">Clear all</button>
     </div>
     <div id="var-chips" class="chips"></div>
   </section>
 
   <!-- Step 2: scope -->
   <section class="panel" id="panel-scope">
-    <h2><span class="step">2</span> Choose scope</h2>
+    <h2><span class="step">2</span> <span data-i18n="choose_scope">Choose scope</span></h2>
     <div class="field">
-      <span>Geographic levels <span class="hint">(tick one or more)</span></span>
+      <span><span data-i18n="geo_levels">Geographic levels</span> <span class="hint" data-i18n="tick_hint">(tick one or more)</span></span>
       <div id="level-checks" class="level-checks">
-        <label><input type="checkbox" value="gminy" checked> Gminy (LAU-2) <span class="lvl-note">municipalities</span></label>
-        <label><input type="checkbox" value="powiaty"> Powiaty (LAU-1) <span class="lvl-note">counties</span></label>
-        <label><input type="checkbox" value="podregiony"> Podregiony (NUTS-3) <span class="lvl-note">subregions</span></label>
-        <label><input type="checkbox" value="wojewodztwa"> Województwa (NUTS-2) <span class="lvl-note">voivodeships</span></label>
+        <label><input type="checkbox" value="gminy" checked> Gminy (LAU-2) <span class="lvl-note" data-gloss="gl_municipalities">municipalities</span></label>
+        <label><input type="checkbox" value="powiaty"> Powiaty (LAU-1) <span class="lvl-note" data-gloss="gl_counties">counties</span></label>
+        <label><input type="checkbox" value="podregiony"> Podregiony (NUTS-3) <span class="lvl-note" data-gloss="gl_subregions">subregions</span></label>
+        <label><input type="checkbox" value="wojewodztwa"> Województwa (NUTS-2) <span class="lvl-note" data-gloss="gl_voivodeships">voivodeships</span></label>
         <label><input type="checkbox" value="makroregiony"> Makroregiony (NUTS-1)</label>
       </div>
     </div>
     <div class="scope-row">
       <label class="field">
-        <span>Years</span>
+        <span data-i18n="years">Years</span>
         <span class="year-pair">
-          <input type="number" id="year-from" placeholder="from" min="1995" max="2024">
+          <input type="number" id="year-from" data-i18n-ph="year_from" placeholder="from" min="1995" max="2024">
           <span class="year-dash">–</span>
-          <input type="number" id="year-to" placeholder="to" min="1995" max="2024">
+          <input type="number" id="year-to" data-i18n-ph="year_to" placeholder="to" min="1995" max="2024">
         </span>
       </label>
     </div>
     <label class="field">
-      <span>Units <span class="hint">(empty = all units at the selected levels)</span></span>
-      <input type="search" id="unit-search" placeholder="Search units, e.g. Bochnia, Kraków…" autocomplete="off" disabled>
+      <span><span data-i18n="units">Units</span> <span class="hint" data-i18n="units_hint">(empty = all units at the selected levels)</span></span>
+      <input type="search" id="unit-search" data-i18n-ph="unit_search_ph" placeholder="Search units…" autocomplete="off" disabled>
     </label>
     <div id="unit-results" class="var-results" hidden></div>
     <div id="unit-chips" class="chips"></div>
@@ -64,36 +70,36 @@
 
   <!-- Step 3: run -->
   <section class="panel panel-run">
-    <button id="run-btn" class="run-btn" disabled>Build dataset</button>
+    <button id="run-btn" class="run-btn" disabled data-i18n="build_dataset">Build dataset</button>
     <span id="run-note" class="hint"></span>
   </section>
 
   <!-- Results -->
   <section class="panel" id="panel-results" hidden>
     <div class="results-head">
-      <h2 id="results-title">Your dataset</h2>
+      <h2 id="results-title" data-i18n="your_dataset">Your dataset</h2>
       <div class="results-actions">
-        <button id="toggle-view" class="ghost-btn" aria-pressed="false">Table view</button>
+        <button id="toggle-view" class="ghost-btn" aria-pressed="false" data-i18n="table_view">Table view</button>
       </div>
     </div>
     <div id="result-summary" class="result-summary"></div>
     <div class="download-bar" id="download-bar">
       <div class="dl-group">
-        <span class="dl-label">Layout</span>
-        <label class="dl-opt"><input type="radio" name="dl-layout" value="long" checked> Long <span class="hint">(one row per observation)</span></label>
-        <label class="dl-opt"><input type="radio" name="dl-layout" value="wide"> Wide <span class="hint">(one column per indicator)</span></label>
+        <span class="dl-label" data-i18n="layout">Layout</span>
+        <label class="dl-opt"><input type="radio" name="dl-layout" value="long" checked> <span data-i18n="long">Long</span> <span class="hint" data-i18n="long_hint">(one row per observation)</span></label>
+        <label class="dl-opt"><input type="radio" name="dl-layout" value="wide"> <span data-i18n="wide">Wide</span> <span class="hint" data-i18n="wide_hint">(one column per indicator)</span></label>
       </div>
       <div class="dl-group">
-        <span class="dl-label">Data files</span>
-        <label class="dl-opt"><input type="radio" name="dl-format" value="combined" checked> One file <span class="hint">(level in a column)</span></label>
-        <label class="dl-opt" id="dl-opt-separate"><input type="radio" name="dl-format" value="separate"> Per level</label>
+        <span class="dl-label" data-i18n="data_files">Data files</span>
+        <label class="dl-opt"><input type="radio" name="dl-format" value="combined" checked> <span data-i18n="one_file">One file</span> <span class="hint" data-i18n="one_file_hint">(level in a column)</span></label>
+        <label class="dl-opt" id="dl-opt-separate"><input type="radio" name="dl-format" value="separate"> <span data-i18n="per_level">Per level</span></label>
       </div>
       <div class="dl-group">
-        <label class="dl-opt"><input type="checkbox" id="dl-docs" checked> Include codebook &amp; README <span class="hint">(as .zip)</span></label>
+        <label class="dl-opt"><input type="checkbox" id="dl-docs" checked> <span data-i18n="incl_docs">Include codebook &amp; README</span> <span class="hint" data-i18n="incl_docs_hint">(as .zip)</span></label>
       </div>
       <div class="dl-group dl-go">
         <span id="dl-estimate" class="dl-estimate"></span>
-        <button id="dl-csv" class="run-btn dl-btn">Download</button>
+        <button id="dl-csv" class="run-btn dl-btn" data-i18n="download">Download</button>
       </div>
     </div>
     <div id="chart-wrap" class="viz-root">
@@ -108,19 +114,16 @@
   </section>
 
   <section class="panel panel-about">
-    <h2>About</h2>
-    <p>Every published variable of the GUS <a href="https://bdl.stat.gov.pl" rel="noopener">Bank Danych Lokalnych</a>
-    at every level from gmina upward, extracted via the official API (1995–2024 where available).
-    Queries run entirely in your browser with <a href="https://duckdb.org/docs/api/wasm/overview" rel="noopener">DuckDB-WASM</a>
-    against hosted Parquet files — only the row groups your query needs are downloaded; there is no server.</p>
-    <p>Bulk data: <span id="data-source-note"></span></p>
-    <p class="attribution">Data source: Główny Urząd Statystyczny (Statistics Poland), Bank Danych Lokalnych, bdl.stat.gov.pl.
+    <h2 data-i18n="about">About</h2>
+    <p data-i18n-html="about_body"></p>
+    <p><span data-i18n="bulk_data">Bulk data:</span> <span id="data-source-note"></span></p>
+    <p class="attribution" data-i18n="attribution">Data source: Główny Urząd Statystyczny (Statistics Poland), Bank Danych Lokalnych, bdl.stat.gov.pl.
     This is an independent interface, not affiliated with or endorsed by GUS.</p>
   </section>
 </main>
 
 <!-- Bump ?v= whenever app.js changes so returning visitors don't run a cached
      app.js against fresh HTML (GitHub Pages caches assets ~10 min). -->
-<script type="module" src="app.js?v=6"></script>
+<script type="module" src="app.js?v=7"></script>
 </body>
 </html>

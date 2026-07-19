@@ -42,6 +42,160 @@ const $ = id => document.getElementById(id);
 const statusEl = $("status");
 function setStatus(cls, msg) { statusEl.className = `status status-${cls}`; statusEl.textContent = msg; }
 
+// ---------- i18n ----------
+// Polish plural: 1 → one; 2–4 (but not 12–14) → few; else → many.
+function plForm(n, one, few, many) {
+  const d = n % 10, h = n % 100;
+  if (n === 1) return one;
+  if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return few;
+  return many;
+}
+const I18N = {
+  en: {
+    tagline: "Polish Local Data Bank — 1.26 billion observations, queried live in your browser",
+    find_data: "Find data",
+    search_ph: "Search a topic in English or Polish, e.g. population, unemployment, ludność…",
+    your_dataset: "Your dataset",
+    clear_all: "Clear all",
+    choose_scope: "Choose scope",
+    geo_levels: "Geographic levels",
+    tick_hint: "(tick one or more)",
+    gl_municipalities: "municipalities", gl_counties: "counties", gl_subregions: "subregions", gl_voivodeships: "voivodeships",
+    years: "Years", year_from: "from", year_to: "to",
+    units: "Units", units_hint: "(empty = all units at the selected levels)",
+    unit_search_ph: "Search units, e.g. Bochnia, Kraków…",
+    build_dataset: "Build dataset",
+    table_view: "Table view", chart_view: "Chart view",
+    layout: "Layout", long: "Long", long_hint: "(one row per observation)",
+    wide: "Wide", wide_hint: "(one column per indicator)",
+    data_files: "Data files", one_file: "One file", one_file_hint: "(level in a column)", per_level: "Per level",
+    incl_docs: "Include codebook & README", incl_docs_hint: "(as .zip)",
+    download: "Download",
+    about: "About",
+    about_body: 'Every published variable of the GUS <a href="https://bdl.stat.gov.pl" rel="noopener">Bank Danych Lokalnych</a> at every level from gmina upward, extracted via the official API (1995–2024 where available). Queries run entirely in your browser with <a href="https://duckdb.org/docs/api/wasm/overview" rel="noopener">DuckDB-WASM</a> against hosted Parquet files — only the row groups your query needs are downloaded; there is no server.',
+    bulk_data: "Bulk data:",
+    attribution: "Data source: Główny Urząd Statystyczny (Statistics Poland), Bank Danych Lokalnych, bdl.stat.gov.pl. This is an independent interface, not affiliated with or endorsed by GUS.",
+    // status
+    st_starting: "Starting DuckDB…", st_loading: "Loading metadata…", st_ready: "Ready",
+    st_building: "Building dataset…", st_preparing: "Preparing download…",
+    st_fail_start: e => `Failed to start: ${e}`, st_fail_build: e => `Build failed: ${e}`, st_fail_dl: e => `Download failed: ${e}`,
+    // run note / cart
+    note_add_var: "Add at least one indicator to your dataset.",
+    note_tick_level: "Tick at least one geographic level.",
+    cart_count: n => `Your dataset: ${n} ${n === 1 ? "indicator" : "indicators"}`,
+    // summary / estimate
+    summary: (obs, nv, lvl, unitsDesc) =>
+      `${fmt.format(obs)} observation${obs === 1 ? "" : "s"} · ${nv} ${nv === 1 ? "indicator" : "indicators"} · ${lvl} · ${unitsDesc}`,
+    lvls_n: n => `${n} levels`,
+    units_all: "all units", units_n: n => `${n} unit${n === 1 ? "" : "s"}`,
+    est: (rows, size, note) => `≈ ${fmt.format(rows)} rows · ${size} <span class="${note[0]}">${note[1]}</span>`,
+    feas_ok: "compiles instantly in your browser",
+    feas_warn: "large — may take a few seconds to build",
+    feas_heavy: "very large — the browser may struggle; narrow units, years, or levels",
+    // facet
+    facet_sub: "Tick one or more values in each breakdown — pick several to add a whole family at once. Total (ogółem) is preselected.",
+    facet_single: "This topic has a single series.",
+    facet_add: "Add to dataset", facet_cancel: "Cancel",
+    facet_count: n => `Adds <strong>${fmt.format(n)}</strong> indicator${n === 1 ? "" : "s"}`,
+    facet_toomany: n => ` — too many; narrow to ≤ ${n} per add`,
+    facet_all: "All", facet_none: "None", facet_filter: n => `filter ${n}…`,
+    breakdown: "Breakdown", breakdowns: n => `${fmt.format(n)} breakdowns`, single_series: "single series",
+    // search
+    no_match: "No topics match at this level. Try English or Polish keywords (diacritics optional).",
+    level_hint: (q, lvl) => `No topic is named “${q}” at <strong>${lvl}</strong> — it may be collected only at another level (e.g. wages are powiat-and-up). The topics below just mention it inside a breakdown.`,
+    the_levels: "the selected levels",
+    tick_level_first: "Tick a geographic level first.",
+    no_units: "No units match at the selected level(s).",
+    // table
+    th_variable: "Variable", th_unit: "Unit", th_unitid: "Unit ID", th_level: "Level", th_year: "Year", th_value: "Value",
+    table_note: (shown, total) => `Showing first ${fmt.format(shown)} of ${fmt.format(total)} rows — download for the full dataset.`,
+    // chart
+    chart_top: (m, total) => `Showing the ${m} series with the highest average value out of ${fmt.format(total)}. The table and download contain everything.`,
+    chart_mixed: units => `Selected indicators use different measure units (${units}); the chart shares one axis — compare with care or use the table.`,
+    no_obs: "No observations matched.", all_empty: "All matched values are empty.",
+    src_local: "local <code>lake_v2/</code> parquet (development mode)",
+  },
+  pl: {
+    tagline: "Bank Danych Lokalnych GUS — 1,26 mld obserwacji, przeszukiwanych na żywo w przeglądarce",
+    find_data: "Znajdź dane",
+    search_ph: "Szukaj tematu po polsku lub angielsku, np. ludność, bezrobocie, population…",
+    your_dataset: "Twój zbiór danych",
+    clear_all: "Wyczyść",
+    choose_scope: "Wybierz zakres",
+    geo_levels: "Poziomy terytorialne",
+    tick_hint: "(zaznacz jeden lub więcej)",
+    gl_municipalities: "", gl_counties: "", gl_subregions: "", gl_voivodeships: "",
+    years: "Lata", year_from: "od", year_to: "do",
+    units: "Jednostki", units_hint: "(puste = wszystkie jednostki na wybranych poziomach)",
+    unit_search_ph: "Szukaj jednostek, np. Bochnia, Kraków…",
+    build_dataset: "Zbuduj zbiór",
+    table_view: "Widok tabeli", chart_view: "Widok wykresu",
+    layout: "Układ", long: "Długi", long_hint: "(jeden wiersz na obserwację)",
+    wide: "Szeroki", wide_hint: "(jedna kolumna na wskaźnik)",
+    data_files: "Pliki danych", one_file: "Jeden plik", one_file_hint: "(poziom w kolumnie)", per_level: "Wg poziomu",
+    incl_docs: "Dołącz książkę kodową i README", incl_docs_hint: "(jako .zip)",
+    download: "Pobierz",
+    about: "O aplikacji",
+    about_body: 'Wszystkie opublikowane zmienne GUS <a href="https://bdl.stat.gov.pl" rel="noopener">Banku Danych Lokalnych</a> na każdym poziomie od gminy wzwyż, pobrane przez oficjalne API (1995–2024, gdy dostępne). Zapytania wykonują się w całości w przeglądarce dzięki <a href="https://duckdb.org/docs/api/wasm/overview" rel="noopener">DuckDB-WASM</a> na hostowanych plikach Parquet — pobierane są tylko potrzebne fragmenty; nie ma serwera.',
+    bulk_data: "Dane zbiorcze:",
+    attribution: "Źródło danych: Główny Urząd Statystyczny, Bank Danych Lokalnych, bdl.stat.gov.pl. Niezależny interfejs, niepowiązany z GUS ani przez GUS nieautoryzowany.",
+    st_starting: "Uruchamianie DuckDB…", st_loading: "Wczytywanie metadanych…", st_ready: "Gotowe",
+    st_building: "Budowanie zbioru…", st_preparing: "Przygotowywanie pliku…",
+    st_fail_start: e => `Błąd uruchomienia: ${e}`, st_fail_build: e => `Błąd budowania: ${e}`, st_fail_dl: e => `Błąd pobierania: ${e}`,
+    note_add_var: "Dodaj co najmniej jeden wskaźnik do zbioru.",
+    note_tick_level: "Zaznacz co najmniej jeden poziom terytorialny.",
+    cart_count: n => `Twój zbiór: ${n} ${plForm(n, "wskaźnik", "wskaźniki", "wskaźników")}`,
+    summary: (obs, nv, lvl, unitsDesc) =>
+      `${fmt.format(obs)} ${plForm(obs, "obserwacja", "obserwacje", "obserwacji")} · ${nv} ${plForm(nv, "wskaźnik", "wskaźniki", "wskaźników")} · ${lvl} · ${unitsDesc}`,
+    lvls_n: n => `${n} ${plForm(n, "poziom", "poziomy", "poziomów")}`,
+    units_all: "wszystkie jednostki", units_n: n => `${n} ${plForm(n, "jednostka", "jednostki", "jednostek")}`,
+    est: (rows, size, note) => `≈ ${fmt.format(rows)} ${plForm(rows, "wiersz", "wiersze", "wierszy")} · ${size} <span class="${note[0]}">${note[1]}</span>`,
+    feas_ok: "kompiluje się natychmiast w przeglądarce",
+    feas_warn: "duży — budowa potrwa kilka sekund",
+    feas_heavy: "bardzo duży — przeglądarka może nie podołać; zawęź jednostki, lata lub poziomy",
+    facet_sub: "Zaznacz co najmniej jedną wartość w każdym podziale — wybierz kilka, aby dodać całą rodzinę naraz. Ogółem jest domyślnie zaznaczone.",
+    facet_single: "Ten temat ma jeden szereg.",
+    facet_add: "Dodaj do zbioru", facet_cancel: "Anuluj",
+    facet_count: n => `Dodaje <strong>${fmt.format(n)}</strong> ${plForm(n, "wskaźnik", "wskaźniki", "wskaźników")}`,
+    facet_toomany: n => ` — za dużo; zawęź do ≤ ${n} na dodanie`,
+    facet_all: "Wszystkie", facet_none: "Żadne", facet_filter: n => `filtruj ${n}…`,
+    breakdown: "Podział", breakdowns: n => `${fmt.format(n)} ${plForm(n, "podział", "podziały", "podziałów")}`, single_series: "jeden szereg",
+    no_match: "Brak tematów na tym poziomie. Spróbuj słów po polsku lub angielsku (znaki diakrytyczne opcjonalne).",
+    level_hint: (q, lvl) => `Żaden temat nie nazywa się „${q}” na poziomie <strong>${lvl}</strong> — może być zbierany tylko na innym poziomie (np. wynagrodzenia są od powiatu wzwyż). Poniższe tematy jedynie wspominają to hasło w podziale.`,
+    the_levels: "wybranych poziomach",
+    tick_level_first: "Najpierw zaznacz poziom terytorialny.",
+    no_units: "Brak jednostek na wybranych poziomach.",
+    th_variable: "Wskaźnik", th_unit: "Jednostka", th_unitid: "Kod jednostki", th_level: "Poziom", th_year: "Rok", th_value: "Wartość",
+    table_note: (shown, total) => `Pokazano pierwsze ${fmt.format(shown)} z ${fmt.format(total)} wierszy — pobierz pełny zbiór.`,
+    chart_top: (m, total) => `Pokazano ${m} szeregów o najwyższej średniej wartości z ${fmt.format(total)}. Tabela i plik zawierają wszystko.`,
+    chart_mixed: units => `Wybrane wskaźniki mają różne jednostki miary (${units}); wykres używa jednej osi — porównuj ostrożnie lub użyj tabeli.`,
+    no_obs: "Brak pasujących obserwacji.", all_empty: "Wszystkie dopasowane wartości są puste.",
+    src_local: "lokalny <code>lake_v2/</code> parquet (tryb deweloperski)",
+  },
+};
+let LANG = localStorage.getItem("bdl_lang") ||
+  ((navigator.language || "").toLowerCase().startsWith("pl") ? "pl" : "en");
+function t(key, ...args) {
+  const v = (I18N[LANG] || I18N.en)[key];
+  return typeof v === "function" ? v(...args) : v;
+}
+// Pick the label to lead with, given a Polish/English pair, per active language.
+function bi(pl, en) {
+  const main = LANG === "pl" ? (pl || en) : (en || pl);
+  const sub = LANG === "pl" ? (en && en !== pl ? en : null) : (pl && pl !== en ? pl : null);
+  return { main: main || "", sub: sub || null };
+}
+function applyStaticI18n() {
+  document.documentElement.lang = LANG;
+  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-html]").forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
+  document.querySelectorAll("[data-i18n-ph]").forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+  // level checkbox glosses (English helper text; hidden in Polish where the term is already Polish)
+  document.querySelectorAll("#level-checks .lvl-note").forEach(el => { el.textContent = t(el.dataset.gloss) || ""; });
+  document.querySelectorAll("[data-lang-btn]").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.langBtn === LANG)));
+}
+
 const state = {
   vars: new Map(),   // variable_id -> {id, name, measure}
   units: new Map(),  // unitId -> {id, name, level}
@@ -53,8 +207,9 @@ let conn, db;
 
 // ---------- bootstrap ----------
 async function init() {
+  applyStaticI18n();
   try {
-    setStatus("loading", "Starting DuckDB…");
+    setStatus("loading", t("st_starting"));
     const bundle = await duckdb.selectBundle(duckdb.getJsDelivrBundles());
     const workerUrl = URL.createObjectURL(
       new Blob([`importScripts("${bundle.mainWorker}");`], { type: "text/javascript" }));
@@ -64,7 +219,7 @@ async function init() {
     URL.revokeObjectURL(workerUrl);
     conn = await db.connect();
 
-    setStatus("loading", "Loading codebook…");
+    setStatus("loading", t("st_loading"));
     // strip_accents leaves Polish ł/Ł untouched (it is not a combining diacritic),
     // so fold it manually — mirrored in normalize() below.
     // English subject names (from the BDL API, lang=en) enable English search.
@@ -114,14 +269,35 @@ async function init() {
     renderQuickStarts();
     $("var-search").disabled = false;
     $("unit-search").disabled = false;
-    $("data-source-note").innerHTML = LOCAL
-      ? `local <code>lake_v2/</code> parquet (development mode)`
-      : `<a href="https://huggingface.co/datasets/fmbeilin/gus-bdl" rel="noopener">huggingface.co/datasets/fmbeilin/gus-bdl</a>`;
-    setStatus("ready", "Ready");
+    updateDataSourceNote();
+    setStatus("ready", t("st_ready"));
   } catch (err) {
     console.error(err);
-    setStatus("error", `Failed to start: ${err.message}`);
+    setStatus("error", t("st_fail_start", err.message));
   }
+}
+
+function updateDataSourceNote() {
+  $("data-source-note").innerHTML = LOCAL ? t("src_local")
+    : `<a href="https://huggingface.co/datasets/fmbeilin/gus-bdl" rel="noopener">huggingface.co/datasets/fmbeilin/gus-bdl</a>`;
+}
+
+// Switch UI language and re-render everything currently on screen.
+function setLang(lang) {
+  if (lang === LANG || !I18N[lang]) return;
+  LANG = lang;
+  localStorage.setItem("bdl_lang", lang);
+  applyStaticI18n();
+  updateDataSourceNote();
+  renderQuickStarts();
+  renderChips("var-chips", state.vars);
+  renderUnitChips();
+  updateRunState();
+  $("toggle-view").textContent = $("table-wrap").hidden ? t("table_view") : t("chart_view");
+  if (conn && statusEl.classList.contains("status-ready")) setStatus("ready", t("st_ready"));
+  if (facetState) renderFacetPanel();
+  else if ($("var-search").value.trim().length >= 2) searchSubjects($("var-search").value);
+  if (!$("panel-results").hidden && state.preview) refreshResults();
 }
 
 // ---------- search helpers ----------
@@ -138,21 +314,22 @@ function debounce(fn, ms) {
 const DIMS = ["n1", "n2", "n3", "n4", "n5"];
 const MAX_VARS = 60;
 const QUICK_STARTS = [
-  ["Population", "ludność"],
-  ["Unemployment", "bezrobotni"],
-  ["Wages", "wynagrodzenia"],
-  ["Dwellings", "mieszkania"],
-  ["Businesses", "podmioty gospodarki"],
-  ["Municipal revenue", "dochody"],
+  { en: "Population", pl: "Ludność", q: "ludność" },
+  { en: "Unemployment", pl: "Bezrobocie", q: "bezrobotni" },
+  { en: "Wages", pl: "Wynagrodzenia", q: "wynagrodzenia" },
+  { en: "Dwellings", pl: "Mieszkania", q: "mieszkania" },
+  { en: "Businesses", pl: "Podmioty gospodarcze", q: "podmioty gospodarki" },
+  { en: "Municipal revenue", pl: "Dochody gmin", q: "dochody" },
 ];
 
 function renderQuickStarts() {
   const wrap = $("quick-starts");
   wrap.innerHTML = "";
-  for (const [label, q] of QUICK_STARTS) {
+  for (const qs of QUICK_STARTS) {
+    const label = qs[LANG];
     const b = document.createElement("button");
     b.className = "quick-start"; b.type = "button"; b.textContent = label;
-    b.onclick = () => { const i = $("var-search"); i.value = q; i.focus(); searchSubjects(q); };
+    b.onclick = () => { const i = $("var-search"); i.value = label; i.focus(); searchSubjects(qs.q); };
     wrap.appendChild(b);
   }
 }
@@ -213,27 +390,25 @@ async function searchSubjects(q) {
   const rows = res.toArray().map(r => r.toJSON());
   box.innerHTML = "";
   if (!rows.length) {
-    box.innerHTML = `<div class="var-more">No topics match at this level. Try English or Polish keywords (diacritics optional).</div>`;
+    box.innerHTML = `<div class="var-more">${t("no_match")}</div>`;
     box.hidden = false; return;
   }
   // If nothing matches by NAME at this level, the term only appears inside
   // breakdowns — usually because the topic isn't collected at this level.
   if (Number(rows[0].name_match) === 1) {
-    const levelName = lvls.length === 1 ? LEVEL_LABEL[lvls[0]] : "the selected levels";
+    const levelName = lvls.length === 1 ? LEVEL_LABEL[lvls[0]] : t("the_levels");
     const h = document.createElement("div");
     h.className = "var-more";
-    h.innerHTML = `No topic is named “${normalize(q)}” at <strong>${levelName}</strong> — ` +
-      `it may be collected only at another level (e.g. wages are powiat-and-up). ` +
-      `The topics below just mention it inside a breakdown.`;
+    h.innerHTML = t("level_hint", normalize(q), levelName);
     box.appendChild(h);
   }
   for (const r of rows) {
     const b = document.createElement("button");
     b.className = "var-row subj-row"; b.type = "button";
-    const breakdowns = r.n_vars > 1 ? `${fmt.format(Number(r.n_vars))} breakdowns` : "single series";
-    const en = r.name_en && r.name_en.toLowerCase() !== r.name.toLowerCase()
-      ? `<span class="subj-en">${esc(r.name_en)}</span>` : "";
-    b.innerHTML = `<span class="subj-main">${esc(r.name)}${en}</span>
+    const breakdowns = r.n_vars > 1 ? t("breakdowns", Number(r.n_vars)) : t("single_series");
+    const label = bi(r.name, r.name_en);
+    const subHtml = label.sub ? `<span class="subj-en">${esc(label.sub)}</span>` : "";
+    b.innerHTML = `<span class="subj-main">${esc(label.main)}${subHtml}</span>
       <span class="subj-meta">${breakdowns}${r.unit && r.unit !== "-" ? " · " + r.unit : ""}</span>`;
     b.onclick = () => openSubject(r.subjectId, r.name);
     box.appendChild(b);
@@ -256,7 +431,7 @@ function parseDimLabels(name, count, lang) {
 }
 function dimLabelsFromName(name, count) {
   return parseDimLabels(name, count, "pl") ||
-    Array.from({ length: count }, (_, i) => count === 1 ? "Breakdown" : `Breakdown ${i + 1}`);
+    Array.from({ length: count }, (_, i) => count === 1 ? t("breakdown") : `${t("breakdown")} ${i + 1}`);
 }
 
 function sortVals(vals) {
@@ -271,7 +446,8 @@ async function openSubject(subjectId, name) {
   $("subj-results").hidden = true;
   const res = await conn.query(`
     SELECT variable_id, n1, n2, n3, n4, n5, n1_en, n2_en, n3_en, n4_en, n5_en,
-           variable_full_name, measureUnitName, any_value(subject_name_en) OVER () AS subject_name_en
+           variable_full_name, variable_full_name_en, measureUnitName,
+           any_value(subject_name_en) OVER () AS subject_name_en
     FROM codebook WHERE subjectId = ${sqlQuote(subjectId)} ORDER BY variable_id`);
   const rows = res.toArray().map(r => r.toJSON());
   const nameEn = rows[0]?.subject_name_en || null;
@@ -295,7 +471,7 @@ async function openSubject(subjectId, name) {
       enMap,
     };
   });
-  facetState = { rows, facets, name };
+  facetState = { rows, facets, name, nameEn };
   renderFacetPanel();
 }
 
@@ -312,38 +488,37 @@ function resolveVars() {
 
 function renderFacetPanel() {
   const panel = $("facet-panel");
-  const { facets, name } = facetState;
+  const { facets, name, nameEn } = facetState;
   const facetHtml = facets.map(f => {
     const withFilter = f.values.length > 8;
     const items = f.values.map(v => {
-      const en = f.enMap.get(v);
-      const enTxt = en && en.toLowerCase() !== v.toLowerCase() ? ` <span class="val-en">${esc(en)}</span>` : "";
-      const filterKey = esc((v + " " + (en || "")).toLowerCase());
-      return `<label data-val="${filterKey}"><input type="checkbox" value="${esc(v)}"${v === "ogółem" ? " checked" : ""}> ${esc(v)}${enTxt}</label>`;
+      const lab = bi(v, f.enMap.get(v));
+      const subTxt = lab.sub ? ` <span class="val-en">${esc(lab.sub)}</span>` : "";
+      const filterKey = esc((v + " " + (f.enMap.get(v) || "")).toLowerCase());
+      return `<label data-val="${filterKey}"><input type="checkbox" value="${esc(v)}"${v === "ogółem" ? " checked" : ""}> ${esc(lab.main)}${subTxt}</label>`;
     }).join("");
     // if no ogółem, default-check the first value so a selection always resolves
     const hasTotal = f.values.includes("ogółem");
-    const labelEn = f.labelEn && f.labelEn.toLowerCase() !== f.label.toLowerCase()
-      ? ` <span class="val-en">${esc(f.labelEn)}</span>` : "";
-    return `<div class="facet"><span>${esc(f.label)}${labelEn} <span class="hint">${f.values.length}</span></span>
+    const lbl = bi(f.label, f.labelEn);
+    const labelSub = lbl.sub ? ` <span class="val-en">${esc(lbl.sub)}</span>` : "";
+    return `<div class="facet"><span>${esc(lbl.main)}${labelSub} <span class="hint">${f.values.length}</span></span>
       <div class="facet-ms">
         <div class="facet-tools">
-          ${withFilter ? `<input class="facet-filter" data-dim="${f.dim}" placeholder="filter ${f.values.length}…">` : ""}
-          <a data-act="all" data-dim="${f.dim}">All</a>
-          <a data-act="none" data-dim="${f.dim}">None</a>
+          ${withFilter ? `<input class="facet-filter" data-dim="${f.dim}" placeholder="${esc(t("facet_filter", f.values.length))}">` : ""}
+          <a data-act="all" data-dim="${f.dim}">${t("facet_all")}</a>
+          <a data-act="none" data-dim="${f.dim}">${t("facet_none")}</a>
         </div>
         <div class="facet-list" id="facet-list-${f.dim}" data-default-first="${hasTotal ? '' : '1'}">${items}</div>
       </div></div>`;
   }).join("");
+  const title = bi(name, nameEn);
   panel.innerHTML = `
-    <div class="facet-title">${esc(name)}</div>
-    <div class="facet-sub">${facets.length
-      ? "Tick one or more values in each breakdown — pick several to add a whole family at once. Total (ogółem) is preselected."
-      : "This topic has a single series."}</div>
+    <div class="facet-title">${esc(title.main)}${title.sub ? ` <span class="val-en">${esc(title.sub)}</span>` : ""}</div>
+    <div class="facet-sub">${facets.length ? t("facet_sub") : t("facet_single")}</div>
     ${facets.length ? `<div class="facet-grid">${facetHtml}</div>` : ""}
     <div class="facet-foot">
-      <button class="facet-add" id="facet-add">Add to dataset</button>
-      <button class="facet-cancel" id="facet-cancel">Cancel</button>
+      <button class="facet-add" id="facet-add">${t("facet_add")}</button>
+      <button class="facet-cancel" id="facet-cancel">${t("facet_cancel")}</button>
       <span class="facet-count" id="facet-count"></span>
     </div>`;
   // default-check first value where there's no ogółem
@@ -371,21 +546,22 @@ function renderFacetPanel() {
 function updateFacetCount() {
   const n = resolveVars().length;
   const el = $("facet-count");
-  el.innerHTML = `Adds <strong>${fmt.format(n)}</strong> indicator${n === 1 ? "" : "s"}`;
+  el.innerHTML = t("facet_count", n);
   $("facet-add").disabled = n === 0 || n > MAX_VARS;
-  if (n > MAX_VARS) el.innerHTML += ` — too many; narrow to ≤ ${MAX_VARS} per add`;
+  if (n > MAX_VARS) el.innerHTML += t("facet_toomany", MAX_VARS);
 }
 
 function addFacetSelection() {
   const resolved = resolveVars();
   if (!resolved.length || resolved.length > MAX_VARS) return;
   if (state.vars.size + resolved.length > MAX_VARS && !resolved.every(r => state.vars.has(Number(r.variable_id)))) {
-    alert(`That would exceed ${MAX_VARS} indicators in the dataset. Remove some first.`); return;
+    alert(t("facet_toomany", MAX_VARS)); return;
   }
   for (const r of resolved) {
     state.vars.set(Number(r.variable_id), {
       id: Number(r.variable_id),
       name: r.variable_full_name,
+      nameEn: r.variable_full_name_en,
       measure: r.measureUnitName,
     });
   }
@@ -403,7 +579,7 @@ async function searchUnits(q) {
   const terms = normalize(q).split(/\s+/).filter(Boolean);
   const where = terms.map(t => `search_key LIKE ${sqlQuote("%" + t + "%")}`).join(" AND ");
   const lvls = selectedLevels();
-  if (!lvls.length) { box.innerHTML = `<div class="var-more">Tick a geographic level first.</div>`; box.hidden = false; return; }
+  if (!lvls.length) { box.innerHTML = `<div class="var-more">${t("tick_level_first")}</div>`; box.hidden = false; return; }
   const codes = lvls.map(l => LEVEL_CODES[l]);
   const multiLvl = codes.length > 1;
   const res = await conn.query(`
@@ -413,7 +589,7 @@ async function searchUnits(q) {
   const rows = res.toArray().map(r => r.toJSON());
   box.innerHTML = "";
   if (!rows.length) {
-    box.innerHTML = `<div class="var-more">No units match at the selected level(s).</div>`;
+    box.innerHTML = `<div class="var-more">${t("no_units")}</div>`;
     box.hidden = false; return;
   }
   for (const r of rows) {
@@ -448,15 +624,18 @@ function renderUnitChips() {
   }
 }
 
+function varLabel(v) { return bi(v.name, v.nameEn).main || v.name; }
+
 function renderChips(elId, map) {
   const wrap = $(elId);
   wrap.innerHTML = "";
   for (const [id, v] of map) {
+    const label = varLabel(v);
     const c = document.createElement("span");
     c.className = "chip";
-    c.innerHTML = `<span class="chip-label" title="${v.name}">${v.name}</span>`;
+    c.innerHTML = `<span class="chip-label" title="${esc(label)}">${esc(label)}</span>`;
     const x = document.createElement("button");
-    x.textContent = "×"; x.title = "Remove"; x.setAttribute("aria-label", `Remove ${v.name}`);
+    x.textContent = "×"; x.title = "Remove"; x.setAttribute("aria-label", `Remove ${esc(label)}`);
     x.onclick = () => { map.delete(id); renderChips(elId, map); updateRunState(); };
     c.appendChild(x);
     wrap.appendChild(c);
@@ -467,13 +646,13 @@ function updateRunState() {
   // cart header
   const n = state.vars.size;
   $("cart-head").hidden = n === 0;
-  $("cart-count").textContent = n === 1 ? "Your dataset: 1 variable" : `Your dataset: ${n} variables`;
+  $("cart-count").textContent = t("cart_count", n);
   // run button
   const hasLevel = selectedLevels().length > 0;
   const ok = n > 0 && hasLevel && conn;
   $("run-btn").disabled = !ok;
-  $("run-note").textContent = !conn ? "" : n === 0 ? "Add at least one variable to your dataset."
-    : !hasLevel ? "Tick at least one geographic level." : "";
+  $("run-note").textContent = !conn ? "" : n === 0 ? t("note_add_var")
+    : !hasLevel ? t("note_tick_level") : "";
 }
 
 // ---------- query ----------
@@ -500,7 +679,7 @@ async function runQuery() {
   if (!state.vars.size || !levels.length) return;
   const snap = { levels, varKeys: [...state.vars.keys()], where: buildWhere() };
   state.snapshot = snap;
-  setStatus("busy", "Building dataset…");
+  setStatus("busy", t("st_building"));
   $("run-btn").disabled = true;
   const t0 = performance.now();
   try {
@@ -510,25 +689,32 @@ async function runQuery() {
     const res = await conn.query(
       `SELECT * FROM (${inner}) ORDER BY variable_id, unitLevel DESC, unitId, year LIMIT ${PREVIEW_LIMIT}`);
     const rows = res.toArray().map(r => r.toJSON());
-    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    // remember for re-rendering (e.g. on language switch) without re-querying
+    state.preview = { rows, total, nUnits: state.units.size, nLevels: levels.length, level1: levels[0] };
     $("panel-results").hidden = false;
-    const lvlLabel = levels.length === 1 ? LEVEL_LABEL[levels[0]] : `${levels.length} levels`;
-    $("result-summary").textContent =
-      `${fmt.format(total)} observations · ${state.vars.size} variable${state.vars.size > 1 ? "s" : ""} · ` +
-      `${lvlLabel} · ${state.units.size || "all"} unit${state.units.size === 1 ? "" : "s"} · ${secs}s`;
-    renderChart(rows);
-    renderTable(rows, total);
-    // "separate files" only makes sense with more than one level
+    refreshResults();
     setSeparateEnabled(levels.length > 1);
-    showEstimate(total);
-    setStatus("ready", "Ready");
+    setStatus("ready", t("st_ready"));
     $("panel-results").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
     console.error(err);
-    setStatus("error", `Build failed: ${err.message}`);
+    setStatus("error", t("st_fail_build", err.message));
   } finally {
     updateRunState();
   }
+}
+
+// Re-render summary + chart + table + estimate from the stored preview (used on
+// build and on language switch — no re-query needed).
+function refreshResults() {
+  const p = state.preview;
+  if (!p) return;
+  const lvlLabel = p.nLevels === 1 ? LEVEL_LABEL[p.level1] : t("lvls_n", p.nLevels);
+  const unitsDesc = (p.nUnits || 0) === 0 ? t("units_all") : t("units_n", p.nUnits);
+  $("result-summary").textContent = t("summary", p.total, state.snapshot.varKeys.length, lvlLabel, unitsDesc);
+  renderChart(p.rows);
+  renderTable(p.rows, p.total);
+  showEstimate(p.total);
 }
 
 function setSeparateEnabled(on) {
@@ -548,10 +734,10 @@ function showEstimate(total) {
   const bytes = total * 95;                 // ~95 B per long-format row
   const size = bytes < 1e6 ? `${Math.max(1, Math.round(bytes / 1e3))} KB`
     : `${(bytes / 1e6).toFixed(bytes < 1e7 ? 1 : 0)} MB`;
-  let cls = "feas-ok", note = "compiles instantly in your browser";
-  if (total > HEAVY_ROWS) { cls = "feas-heavy"; note = "very large — the browser may struggle; narrow units, years, or levels"; }
-  else if (total > WARN_ROWS) { cls = "feas-warn"; note = "large — may take a few seconds to build"; }
-  el.innerHTML = `≈ ${fmt.format(total)} rows · ${size} <span class="${cls}">${note}</span>`;
+  let cls = "feas-ok", note = t("feas_ok");
+  if (total > HEAVY_ROWS) { cls = "feas-heavy"; note = t("feas_heavy"); }
+  else if (total > WARN_ROWS) { cls = "feas-warn"; note = t("feas_warn"); }
+  el.innerHTML = t("est", total, size, [cls, note]);
   $("dl-csv").disabled = total === 0;
 }
 
@@ -562,7 +748,7 @@ function seriesName(r) {
   const multiLvl = (state.snapshot?.levels.length || 1) > 1;
   const parts = [r.unitName];
   if (multiLvl) parts.push(LEVEL_SHORT[r.unitLevel]);
-  if (state.vars.size > 1) parts.push(v ? v.name : r.variable_id);
+  if (state.vars.size > 1) parts.push(v ? varLabel(v) : r.variable_id);
   return parts.filter(Boolean).join(" — ");
 }
 
@@ -573,7 +759,7 @@ function renderChart(rows) {
   const note = $("chart-note");
   note.hidden = true;
 
-  if (!rows.length) { wrap.innerHTML = `<p class="hint">No observations matched.</p>`; return; }
+  if (!rows.length) { wrap.innerHTML = `<p class="hint">${t("no_obs")}</p>`; return; }
 
   // Group into series
   const seriesMap = new Map();
@@ -592,16 +778,15 @@ function renderChart(rows) {
       return bm - am;
     });
     series = series.slice(0, MAX_SERIES);
-    note.textContent = `Showing the ${MAX_SERIES} series with the highest average value out of ${fmt.format(totalSeries)}. The table and CSV contain everything.`;
+    note.textContent = t("chart_top", MAX_SERIES, totalSeries);
     note.hidden = false;
   }
-  if (!series.length) { wrap.innerHTML = `<p class="hint">All matched values are empty.</p>`; return; }
+  if (!series.length) { wrap.innerHTML = `<p class="hint">${t("all_empty")}</p>`; return; }
 
   // Mixed measure units across variables → warn (one axis only)
   const measures = new Set([...state.vars.values()].map(v => v.measure || ""));
   if (state.vars.size > 1 && measures.size > 1) {
-    note.textContent = (note.hidden ? "" : note.textContent + " ") +
-      `Selected variables use different measure units (${[...measures].join(", ")}); the chart shares one axis — compare with care or use the table.`;
+    note.textContent = (note.hidden ? "" : note.textContent + " ") + t("chart_mixed", [...measures].join(", "));
     note.hidden = false;
   }
 
@@ -745,18 +930,16 @@ function renderTable(rows, total) {
   const tbl = $("result-table");
   const shown = rows.slice(0, TABLE_LIMIT);
   const multiLvl = (state.snapshot?.levels.length || 1) > 1;
-  const varName = id => { const v = state.vars.get(Number(id)); return v ? v.name : id; };
-  const lvlHead = multiLvl ? "<th>Level</th>" : "";
+  const varName = id => { const v = state.vars.get(Number(id)); return v ? varLabel(v) : id; };
+  const lvlHead = multiLvl ? `<th>${t("th_level")}</th>` : "";
   tbl.innerHTML =
-    `<thead><tr><th>Variable</th><th>Unit</th><th>Unit&nbsp;ID</th>${lvlHead}<th>Year</th><th>Value</th></tr></thead>` +
+    `<thead><tr><th>${t("th_variable")}</th><th>${t("th_unit")}</th><th>${t("th_unitid")}</th>${lvlHead}<th>${t("th_year")}</th><th>${t("th_value")}</th></tr></thead>` +
     `<tbody>` + shown.map(r =>
-      `<tr><td>${truncate(varName(r.variable_id), 70)}</td><td>${r.unitName}</td><td>${r.unitId}</td>` +
+      `<tr><td>${esc(truncate(varName(r.variable_id), 70))}</td><td>${esc(r.unitName)}</td><td>${r.unitId}</td>` +
       `${multiLvl ? `<td>${LEVEL_NAME[r.unitLevel] || r.unitLevel}</td>` : ""}` +
       `<td class="num">${r.year}</td><td class="num">${fmtVal(r.value)}</td></tr>`).join("") + `</tbody>`;
   total = total ?? rows.length;
-  $("table-note").textContent = total > shown.length
-    ? `Showing first ${fmt.format(shown.length)} of ${fmt.format(total)} rows — download for the full dataset.`
-    : "";
+  $("table-note").textContent = total > shown.length ? t("table_note", shown.length, total) : "";
 }
 
 // ---------- dataset download ----------
@@ -873,7 +1056,7 @@ async function downloadDataset() {
   const layout = document.querySelector('input[name="dl-layout"]:checked').value;
   const withDocs = $("dl-docs").checked;
   const stamp = new Date().toISOString().slice(0, 10);
-  setStatus("busy", "Preparing download…");
+  setStatus("busy", t("st_preparing"));
   $("dl-csv").disabled = true;
   try {
     // Build the data file(s): one combined, or one per non-empty level.
@@ -891,7 +1074,7 @@ async function downloadDataset() {
       const buf = await copyToBuffer(wrapExport(inner, layout), "data.csv");
       dataFiles.push({ name: "data.csv", data: buf });
     }
-    if (!dataFiles.length) { setStatus("ready", "Ready"); return; }
+    if (!dataFiles.length) { setStatus("ready", t("st_ready")); return; }
 
     if (withDocs) {
       const codebook = await copyToBuffer(codebookSql(snap), "codebook.csv");
@@ -903,10 +1086,10 @@ async function downloadDataset() {
     } else {
       downloadBlob(makeZip(dataFiles), `bdl_dataset_${stamp}.zip`);
     }
-    setStatus("ready", "Ready");
+    setStatus("ready", t("st_ready"));
   } catch (err) {
     console.error(err);
-    setStatus("error", `Download failed: ${err.message}`);
+    setStatus("error", t("st_fail_dl", err.message));
   } finally {
     $("dl-csv").disabled = false;
   }
@@ -972,8 +1155,10 @@ $("toggle-view").addEventListener("click", () => {
   $("table-wrap").hidden = !toTable;
   $("chart-wrap").hidden = toTable;
   $("toggle-view").setAttribute("aria-pressed", String(toTable));
-  $("toggle-view").textContent = toTable ? "Chart view" : "Table view";
+  $("toggle-view").textContent = toTable ? t("chart_view") : t("table_view");
 });
+document.querySelectorAll("[data-lang-btn]").forEach(b =>
+  b.addEventListener("click", () => setLang(b.dataset.langBtn)));
 document.addEventListener("click", ev => {
   // keep the subject dropdown open while interacting with the facet panel
   if (!ev.target.closest("#panel-vars")) $("subj-results").hidden = true;
