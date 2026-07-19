@@ -222,6 +222,7 @@ input:disabled { opacity: 0.55; }
 .facet-list label.hidden { display: none; }
 .facet-list input { accent-color: var(--accent); }
 .facet-single { font-size: 13px; color: var(--text-secondary); padding: 4px 0; }
+.val-en { color: var(--text-muted); font-style: italic; font-weight: 400; }
 
 .scope-row { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 12px; }
 .field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--text-secondary); }

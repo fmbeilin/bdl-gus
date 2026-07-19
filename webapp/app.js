@@ -69,20 +69,37 @@ async function init() {
     // so fold it manually — mirrored in normalize() below.
     // English subject names (from the BDL API, lang=en) enable English search.
     // Optional file — fall back to Polish-only if it isn't hosted yet.
-    let hasEn = true;
+    // English subject names + per-variable dimension labels (BDL API lang=en)
+    // enable English search & display. Both files are optional — fall back to
+    // Polish-only if either isn't hosted yet.
+    let hasEn = true, hasVarEn = true;
     try { await conn.query(`CREATE TABLE subjects_en AS SELECT subjectId, name_en FROM read_parquet('${DATA_BASE}/subjects_en.parquet')`); }
     catch { hasEn = false; }
+    try { await conn.query(`CREATE TABLE variables_en AS SELECT * FROM read_parquet('${DATA_BASE}/variables_en.parquet')`); }
+    catch { hasVarEn = false; }
+    const enName = hasEn ? "e.name_en" : "NULL";
+    const enDims = hasVarEn ? "v.variable_dimensions_en" : "NULL";
+    const enUnit = hasVarEn ? "v.measureUnitName_en" : "NULL";
+    // English full name = English subject + English dims (falls back to subject only)
+    const enFull = hasVarEn
+      ? `nullif(concat_ws(': ', ${enName}, nullif(v.variable_dimensions_en,'')), '')`
+      : enName;
+    // English search text = subject_en + dims_en
+    const enSearch = `lower(coalesce(${enName},'') || ' ' || coalesce(${enDims},''))`;
     await conn.query(`
       CREATE TABLE codebook AS
       SELECT c.variable_id, c.subjectId, c.subject_name, c.variable_dimensions,
              c.n1, c.n2, c.n3, c.n4, c.n5,
-             c.unit_level, c.measureUnitName, c.variable_full_name,
-             ${hasEn ? "e.name_en" : "NULL"} AS subject_name_en,
+             ${hasVarEn ? "v.n1_en, v.n2_en, v.n3_en, v.n4_en, v.n5_en" : "NULL AS n1_en, NULL AS n2_en, NULL AS n3_en, NULL AS n4_en, NULL AS n5_en"},
+             c.unit_level, c.measureUnitName, ${enUnit} AS measureUnitName_en, c.variable_full_name,
+             ${enName} AS subject_name_en, ${enDims} AS variable_dimensions_en, ${enFull} AS variable_full_name_en,
              replace(strip_accents(lower(c.subject_name || ' ' || coalesce(c.variable_dimensions,''))), 'ł', 'l') AS search_key,
              replace(strip_accents(lower(c.subject_name)), 'ł', 'l') AS subj_norm,
-             ${hasEn ? "lower(coalesce(e.name_en,''))" : "''"} AS subj_en_norm
+             lower(coalesce(${enName},'')) AS subj_en_norm,
+             ${enSearch} AS search_key_en
       FROM read_parquet('${DATA_BASE}/codebook.parquet') c
-      ${hasEn ? "LEFT JOIN subjects_en e ON c.subjectId = e.subjectId" : ""}`);
+      ${hasEn ? "LEFT JOIN subjects_en e ON c.subjectId = e.subjectId" : ""}
+      ${hasVarEn ? "LEFT JOIN variables_en v ON c.variable_id = v.id" : ""}`);
     await conn.query(`
       CREATE TABLE units AS
       SELECT unitId, unitName, unitLevel,
@@ -163,8 +180,8 @@ async function searchSubjects(q) {
   // finds "dwelling", etc.
   const likeAny = (cols, t) =>
     "(" + termVariants(t).flatMap(v => cols.map(c => `${c} LIKE ${sqlQuote("%" + v + "%")}`)).join(" OR ") + ")";
-  // Broad filter: Polish name/breakdown OR English subject name.
-  const where = terms.map(t => likeAny(["search_key", "subj_en_norm"], t)).join(" AND ");
+  // Broad filter: Polish name/breakdown OR English name/breakdown.
+  const where = terms.map(t => likeAny(["search_key", "search_key_en"], t)).join(" AND ");
   // name_all: every term appears in the SUBJECT NAME (Polish or English).
   const nameAll = terms.map(t => likeAny(["norm", "en_norm"], t)).join(" AND ");
   // A subject is available at a facts level X iff its unit_level >= X. Across
@@ -224,14 +241,22 @@ async function searchSubjects(q) {
   box.hidden = false;
 }
 
-// Try to name each breakdown axis from the subject title ("… wg płci i wieku").
-function dimLabelsFromName(name, count) {
-  const m = name.match(/(?:wg|według)\s+(.+)$/i);
+// Try to name each breakdown axis from the subject title
+// ("… wg płci i wieku" / "… by sex and age"). Returns null if it can't.
+function parseDimLabels(name, count, lang) {
+  if (!name) return null;
+  const re = lang === "en" ? /\bby\s+(.+)$/i : /(?:wg|według)\s+(.+)$/i;
+  const sep = lang === "en" ? /\s*,\s*|\s+and\s+/ : /\s*,\s*|\s+i\s+/;
+  const m = name.match(re);
   if (m) {
-    const parts = m[1].split(/\s*,\s*|\s+i\s+/).map(s => s.trim()).filter(Boolean);
+    const parts = m[1].split(sep).map(s => s.trim()).filter(Boolean);
     if (parts.length === count) return parts.map(p => p.charAt(0).toUpperCase() + p.slice(1));
   }
-  return Array.from({ length: count }, (_, i) => count === 1 ? "Breakdown" : `Breakdown ${i + 1}`);
+  return null;
+}
+function dimLabelsFromName(name, count) {
+  return parseDimLabels(name, count, "pl") ||
+    Array.from({ length: count }, (_, i) => count === 1 ? "Breakdown" : `Breakdown ${i + 1}`);
 }
 
 function sortVals(vals) {
@@ -245,18 +270,31 @@ let facetState = null;   // { rows, facets:[{dim,label,values}], name }
 async function openSubject(subjectId, name) {
   $("subj-results").hidden = true;
   const res = await conn.query(`
-    SELECT variable_id, n1, n2, n3, n4, n5, variable_full_name, measureUnitName
+    SELECT variable_id, n1, n2, n3, n4, n5, n1_en, n2_en, n3_en, n4_en, n5_en,
+           variable_full_name, measureUnitName, any_value(subject_name_en) OVER () AS subject_name_en
     FROM codebook WHERE subjectId = ${sqlQuote(subjectId)} ORDER BY variable_id`);
   const rows = res.toArray().map(r => r.toJSON());
+  const nameEn = rows[0]?.subject_name_en || null;
   const activeDims = DIMS.filter(d => {
     const vals = new Set(rows.map(r => r[d]).filter(v => v != null && v !== "NA"));
     return vals.size > 1;
   });
-  const labels = dimLabelsFromName(name, activeDims.length);
-  const facets = activeDims.map((d, i) => ({
-    dim: d, label: labels[i],
-    values: sortVals([...new Set(rows.map(r => r[d]).filter(v => v != null && v !== "NA"))]),
-  }));
+  const plLabels = dimLabelsFromName(name, activeDims.length);
+  const enLabels = parseDimLabels(nameEn, activeDims.length, "en");
+  const facets = activeDims.map((d, i) => {
+    // Polish value -> English value, from variables that carry both.
+    const enMap = new Map();
+    for (const r of rows) {
+      if (r[d] != null && r[d] !== "NA" && r[`${d}_en`]) enMap.set(r[d], r[`${d}_en`]);
+    }
+    return {
+      dim: d,
+      label: plLabels[i],
+      labelEn: enLabels ? enLabels[i] : null,
+      values: sortVals([...new Set(rows.map(r => r[d]).filter(v => v != null && v !== "NA"))]),
+      enMap,
+    };
+  });
   facetState = { rows, facets, name };
   renderFacetPanel();
 }
@@ -277,12 +315,17 @@ function renderFacetPanel() {
   const { facets, name } = facetState;
   const facetHtml = facets.map(f => {
     const withFilter = f.values.length > 8;
-    const items = f.values.map(v =>
-      `<label data-val="${esc(v.toLowerCase())}"><input type="checkbox" value="${esc(v)}"${v === "ogółem" ? " checked" : ""}> ${esc(v)}</label>`
-    ).join("");
+    const items = f.values.map(v => {
+      const en = f.enMap.get(v);
+      const enTxt = en && en.toLowerCase() !== v.toLowerCase() ? ` <span class="val-en">${esc(en)}</span>` : "";
+      const filterKey = esc((v + " " + (en || "")).toLowerCase());
+      return `<label data-val="${filterKey}"><input type="checkbox" value="${esc(v)}"${v === "ogółem" ? " checked" : ""}> ${esc(v)}${enTxt}</label>`;
+    }).join("");
     // if no ogółem, default-check the first value so a selection always resolves
     const hasTotal = f.values.includes("ogółem");
-    return `<div class="facet"><span>${esc(f.label)} <span class="hint">${f.values.length}</span></span>
+    const labelEn = f.labelEn && f.labelEn.toLowerCase() !== f.label.toLowerCase()
+      ? ` <span class="val-en">${esc(f.labelEn)}</span>` : "";
+    return `<div class="facet"><span>${esc(f.label)}${labelEn} <span class="hint">${f.values.length}</span></span>
       <div class="facet-ms">
         <div class="facet-tools">
           ${withFilter ? `<input class="facet-filter" data-dim="${f.dim}" placeholder="filter ${f.values.length}…">` : ""}
@@ -763,9 +806,11 @@ function downloadBlob(blob, name) {
 
 // Per-variable documentation (PL + EN names, subject, breakdown, unit, level).
 function codebookSql(snap) {
-  return `SELECT variable_id, variable_full_name AS variable_name, ` +
+  return `SELECT variable_id, ` +
+    `variable_full_name AS variable_name, variable_full_name_en AS variable_name_en, ` +
     `subject_name AS subject_pl, subject_name_en AS subject_en, ` +
-    `variable_dimensions AS breakdown, measureUnitName AS measure_unit, ` +
+    `variable_dimensions AS breakdown_pl, variable_dimensions_en AS breakdown_en, ` +
+    `measureUnitName AS measure_unit, measureUnitName_en AS measure_unit_en, ` +
     `CASE unit_level WHEN 6 THEN 'gmina' WHEN 5 THEN 'powiat' WHEN 4 THEN 'podregion' ` +
     `WHEN 3 THEN 'region' WHEN 2 THEN 'wojewodztwo' WHEN 1 THEN 'makroregion' WHEN 0 THEN 'Polska' ` +
     `ELSE CAST(unit_level AS VARCHAR) END AS lowest_level, subjectId ` +
