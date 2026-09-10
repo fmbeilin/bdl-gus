@@ -31,3 +31,4 @@ wykleci_gminy_population.csv
 # English metadata fetch outputs (regenerable via fetch_english_meta.py; parquet lives on HF)
 subjects_en.csv
 variables_en.csv
+subject_tree.csv
