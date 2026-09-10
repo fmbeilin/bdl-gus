@@ -34,6 +34,16 @@ host. Two requirements for the hosted version:
   language (with light suffix-stemming, so "unemployment" finds "unemployed").
   Results show the Polish name with the English translation beneath. Dimension
   values in the breakdown picker are still Polish.
+- **Three-pane workspace**: *Find a topic* (left) · *Choose breakdowns* (middle) ·
+  *Your dataset* (right). Each pane scrolls independently, so the cart and scope
+  stay visible while you browse — no scrolling between steps.
+- **Browse by family**: the left pane is a `theme → group → subject` tree
+  (33 themes, 275 groups) with live counts of how many topics exist at the
+  ticked geographic levels. This matters because the local metadata lost the
+  hierarchy (every subject's `parentId` points at a `G` code that was never
+  stored); `fetch_subject_tree.py` re-fetches it from the API in PL+EN and
+  `build_subject_tree.R` writes `subject_tree.parquet`. Search results carry the
+  same `theme › group` breadcrumb, so a hit tells you which family it belongs to.
 - **Dataset cart**: search is subject-first — pick a topic, then a breakdown.
   Each dimension is a **multi-select** checklist (with a filter + All/None), so
   you can add a whole family at once (e.g. both sexes × several age groups). The

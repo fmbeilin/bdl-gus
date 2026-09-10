@@ -56,6 +56,14 @@ const I18N = {
     find_data: "Find data",
     search_ph: "Search a topic in English or Polish, e.g. population, unemployment, ludność…",
     your_dataset: "Your dataset",
+    browse_title: "Find a topic", detail_title: "Choose breakdowns",
+    results_title: "Preview & download",
+    detail_empty: "Pick a topic on the left — browse the themes, or search — then choose exactly which breakdowns you want and add them to your dataset.",
+    cart_empty: "No indicators yet. Browse a theme on the left, pick the breakdowns you want, and they land here.",
+    topics_n: n => `${n} ${n === 1 ? "topic" : "topics"}`,
+    search_results: "Search results",
+    browse_themes: "Browse by theme",
+    clear_search: "clear search",
     clear_all: "Clear all",
     choose_scope: "Choose scope",
     geo_levels: "Geographic levels",
@@ -120,6 +128,14 @@ const I18N = {
     find_data: "Znajdź dane",
     search_ph: "Szukaj tematu po polsku lub angielsku, np. ludność, bezrobocie, population…",
     your_dataset: "Twój zbiór danych",
+    browse_title: "Znajdź temat", detail_title: "Wybierz podziały",
+    results_title: "Podgląd i pobieranie",
+    detail_empty: "Wybierz temat po lewej — przeglądaj kategorie lub szukaj — a następnie zaznacz dokładnie te podziały, które chcesz, i dodaj je do zbioru.",
+    cart_empty: "Brak wskaźników. Wybierz kategorię po lewej, zaznacz podziały, a pojawią się tutaj.",
+    topics_n: n => `${n} ${plForm(n, "temat", "tematy", "tematów")}`,
+    search_results: "Wyniki wyszukiwania",
+    browse_themes: "Przeglądaj wg kategorii",
+    clear_search: "wyczyść wyszukiwanie",
     clear_all: "Wyczyść",
     choose_scope: "Wybierz zakres",
     geo_levels: "Poziomy terytorialne",
@@ -182,8 +198,10 @@ function t(key, ...args) {
 // Pick the label to lead with, given a Polish/English pair, per active language.
 function bi(pl, en) {
   const main = LANG === "pl" ? (pl || en) : (en || pl);
-  const sub = LANG === "pl" ? (en && en !== pl ? en : null) : (pl && pl !== en ? pl : null);
-  return { main: main || "", sub: sub || null };
+  const other = LANG === "pl" ? en : pl;
+  // no subtitle when the other language is missing or identical (it would
+  // otherwise echo the main label)
+  return { main: main || "", sub: other && other !== main ? other : null };
 }
 function applyStaticI18n() {
   document.documentElement.lang = LANG;
@@ -232,6 +250,10 @@ async function init() {
     catch { hasEn = false; }
     try { await conn.query(`CREATE TABLE variables_en AS SELECT * FROM read_parquet('${DATA_BASE}/variables_en.parquet')`); }
     catch { hasVarEn = false; }
+    // Subject hierarchy (theme -> group -> subject) powers browsing by family.
+    let hasTree = true;
+    try { await conn.query(`CREATE TABLE subject_tree AS SELECT * FROM read_parquet('${DATA_BASE}/subject_tree.parquet')`); }
+    catch { hasTree = false; }
     const enName = hasEn ? "e.name_en" : "NULL";
     const enDims = hasVarEn ? "v.variable_dimensions_en" : "NULL";
     const enUnit = hasVarEn ? "v.measureUnitName_en" : "NULL";
@@ -248,13 +270,16 @@ async function init() {
              ${hasVarEn ? "v.n1_en, v.n2_en, v.n3_en, v.n4_en, v.n5_en" : "NULL AS n1_en, NULL AS n2_en, NULL AS n3_en, NULL AS n4_en, NULL AS n5_en"},
              c.unit_level, c.measureUnitName, ${enUnit} AS measureUnitName_en, c.variable_full_name,
              ${enName} AS subject_name_en, ${enDims} AS variable_dimensions_en, ${enFull} AS variable_full_name_en,
+             ${hasTree ? "st.theme_id, st.theme_pl, st.theme_en, st.group_id, st.group_pl, st.group_en"
+                       : "NULL AS theme_id, NULL AS theme_pl, NULL AS theme_en, NULL AS group_id, NULL AS group_pl, NULL AS group_en"},
              replace(strip_accents(lower(c.subject_name || ' ' || coalesce(c.variable_dimensions,''))), 'ł', 'l') AS search_key,
              replace(strip_accents(lower(c.subject_name)), 'ł', 'l') AS subj_norm,
              lower(coalesce(${enName},'')) AS subj_en_norm,
              ${enSearch} AS search_key_en
       FROM read_parquet('${DATA_BASE}/codebook.parquet') c
       ${hasEn ? "LEFT JOIN subjects_en e ON c.subjectId = e.subjectId" : ""}
-      ${hasVarEn ? "LEFT JOIN variables_en v ON c.variable_id = v.id" : ""}`);
+      ${hasVarEn ? "LEFT JOIN variables_en v ON c.variable_id = v.id" : ""}
+      ${hasTree ? "LEFT JOIN subject_tree st ON c.subjectId = st.subjectId" : ""}`);
     await conn.query(`
       CREATE TABLE units AS
       SELECT unitId, unitName, unitLevel,
@@ -270,6 +295,8 @@ async function init() {
     $("var-search").disabled = false;
     $("unit-search").disabled = false;
     updateDataSourceNote();
+    await renderBrowseTree();
+    updateRunState();
     setStatus("ready", t("st_ready"));
   } catch (err) {
     console.error(err);
@@ -295,8 +322,9 @@ function setLang(lang) {
   updateRunState();
   $("toggle-view").textContent = $("table-wrap").hidden ? t("table_view") : t("chart_view");
   if (conn && statusEl.classList.contains("status-ready")) setStatus("ready", t("st_ready"));
+  renderBrowseTree();
   if (facetState) renderFacetPanel();
-  else if ($("var-search").value.trim().length >= 2) searchSubjects($("var-search").value);
+  if ($("var-search").value.trim().length >= 2) searchSubjects($("var-search").value);
   if (!$("panel-results").hidden && state.preview) refreshResults();
 }
 
@@ -349,8 +377,8 @@ function termVariants(t) {
 
 async function searchSubjects(q) {
   const box = $("subj-results");
-  $("facet-panel").hidden = true;
-  if (q.trim().length < 2) { box.hidden = true; return; }
+  if (q.trim().length < 2) { box.hidden = true; $("browse-tree").hidden = false; return; }
+  $("browse-tree").hidden = true;
   const terms = normalize(q).split(/\s+/).filter(Boolean);
   // Each term matches if any of its variants (the word or a light stem) is a
   // substring — so English "unemployment" finds "unemployed", "dwellings"
@@ -374,6 +402,8 @@ async function searchSubjects(q) {
       SELECT subjectId,
              any_value(subject_name) AS name,
              any_value(subject_name_en) AS name_en,
+             any_value(theme_pl) AS theme_pl, any_value(theme_en) AS theme_en,
+             any_value(group_pl) AS group_pl, any_value(group_en) AS group_en,
              any_value(subj_norm)   AS norm,
              any_value(subj_en_norm) AS en_norm,
              count(*)               AS n_vars,
@@ -381,7 +411,7 @@ async function searchSubjects(q) {
       FROM codebook WHERE ${where} AND unit_level >= ${minCode}
       GROUP BY subjectId
     )
-    SELECT subjectId, name, name_en, n_vars, unit,
+    SELECT subjectId, name, name_en, theme_pl, theme_en, group_pl, group_en, n_vars, unit,
       (CASE WHEN ${nameAll} THEN 0 ELSE 1 END) AS name_match,
       (CASE WHEN norm LIKE ${prefix} OR en_norm LIKE ${prefix} THEN 0 ELSE 1 END) AS is_prefix,
       (length(name) - length(replace(name, ',', ''))) AS commas,
@@ -408,7 +438,9 @@ async function searchSubjects(q) {
     const breakdowns = r.n_vars > 1 ? t("breakdowns", Number(r.n_vars)) : t("single_series");
     const label = bi(r.name, r.name_en);
     const subHtml = label.sub ? `<span class="subj-en">${esc(label.sub)}</span>` : "";
-    b.innerHTML = `<span class="subj-main">${esc(label.main)}${subHtml}</span>
+    const crumb = crumbOf(r);
+    b.innerHTML = `<span class="subj-main">${esc(label.main)}${subHtml}` +
+      `${crumb ? `<span class="subj-crumb">${esc(crumb)}</span>` : ""}</span>
       <span class="subj-meta">${breakdowns}${r.unit && r.unit !== "-" ? " · " + r.unit : ""}</span>`;
     b.onclick = () => openSubject(r.subjectId, r.name);
     box.appendChild(b);
@@ -443,14 +475,17 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 let facetState = null;   // { rows, facets:[{dim,label,values}], name }
 
 async function openSubject(subjectId, name) {
-  $("subj-results").hidden = true;
+  $("detail-empty").hidden = true;
   const res = await conn.query(`
     SELECT variable_id, n1, n2, n3, n4, n5, n1_en, n2_en, n3_en, n4_en, n5_en,
            variable_full_name, variable_full_name_en, measureUnitName,
-           any_value(subject_name_en) OVER () AS subject_name_en
+           any_value(subject_name_en) OVER () AS subject_name_en,
+           any_value(theme_pl) OVER () AS theme_pl, any_value(theme_en) OVER () AS theme_en,
+           any_value(group_pl) OVER () AS group_pl, any_value(group_en) OVER () AS group_en
     FROM codebook WHERE subjectId = ${sqlQuote(subjectId)} ORDER BY variable_id`);
   const rows = res.toArray().map(r => r.toJSON());
   const nameEn = rows[0]?.subject_name_en || null;
+  const family = rows[0] || null;   // keep raw values; crumb is rendered per language
   const activeDims = DIMS.filter(d => {
     const vals = new Set(rows.map(r => r[d]).filter(v => v != null && v !== "NA"));
     return vals.size > 1;
@@ -471,7 +506,7 @@ async function openSubject(subjectId, name) {
       enMap,
     };
   });
-  facetState = { rows, facets, name, nameEn };
+  facetState = { rows, facets, name, nameEn, family };
   renderFacetPanel();
 }
 
@@ -488,7 +523,8 @@ function resolveVars() {
 
 function renderFacetPanel() {
   const panel = $("facet-panel");
-  const { facets, name, nameEn } = facetState;
+  const { facets, name, nameEn, family } = facetState;
+  const crumb = family ? crumbOf(family) : "";
   const facetHtml = facets.map(f => {
     const withFilter = f.values.length > 8;
     const items = f.values.map(v => {
@@ -513,6 +549,7 @@ function renderFacetPanel() {
   }).join("");
   const title = bi(name, nameEn);
   panel.innerHTML = `
+    ${crumb ? `<div class="facet-crumb">${esc(crumb)}</div>` : ""}
     <div class="facet-title">${esc(title.main)}${title.sub ? ` <span class="val-en">${esc(title.sub)}</span>` : ""}</div>
     <div class="facet-sub">${facets.length ? t("facet_sub") : t("facet_single")}</div>
     ${facets.length ? `<div class="facet-grid">${facetHtml}</div>` : ""}
@@ -538,7 +575,10 @@ function renderFacetPanel() {
       l.classList.toggle("hidden", q && !l.dataset.val.includes(q)));
   }));
   $("facet-add").addEventListener("click", addFacetSelection);
-  $("facet-cancel").addEventListener("click", () => { panel.hidden = true; facetState = null; });
+  $("facet-cancel").addEventListener("click", () => {
+    panel.hidden = true; facetState = null; $("detail-empty").hidden = false;
+    document.querySelectorAll(".tree-subject.is-active").forEach(e => e.classList.remove("is-active"));
+  });
   panel.hidden = false;
   updateFacetCount();
 }
@@ -566,10 +606,109 @@ function addFacetSelection() {
     });
   }
   renderChips("var-chips", state.vars);
-  $("facet-panel").hidden = true;
-  facetState = null;
-  $("var-search").value = "";
   updateRunState();
+}
+
+// ---------- browse tree (theme -> group -> subject) ----------
+// GUS theme/group names arrive SHOUTED; sentence-case them for reading.
+function sentenceCase(str) {
+  if (!str) return "";
+  if (/[a-ząćęłńóśźż]/.test(str)) return str;          // already mixed case
+  const low = str.toLocaleLowerCase("pl");
+  return low.charAt(0).toLocaleUpperCase("pl") + low.slice(1);
+}
+// Coarsest selected level decides what's available (see searchSubjects).
+function levelFloor() {
+  const lvls = selectedLevels();
+  return lvls.length ? Math.min(...lvls.map(l => LEVEL_CODES[l])) : 1;
+}
+function crumbOf(r) {
+  const th = sentenceCase(bi(r.theme_pl, r.theme_en).main);
+  const gr = sentenceCase(bi(r.group_pl, r.group_en).main);
+  return [th, gr].filter(x => x && x !== "—").join(" › ");
+}
+
+function treeRow(cls, labelHtml, countHtml, expandable) {
+  const b = document.createElement("button");
+  b.className = `tree-row ${cls}`; b.type = "button";
+  if (expandable) b.setAttribute("aria-expanded", "false");
+  b.innerHTML = `${expandable ? '<span class="tree-chev">▶</span>' : '<span class="tree-chev"></span>'}
+    <span class="tree-label">${labelHtml}</span>${countHtml}`;
+  return b;
+}
+function labelHtml(pl, en, caseFn = (x => x)) {
+  const l = bi(pl, en);
+  return `${esc(caseFn(l.main))}${l.sub ? `<span class="tree-sub">${esc(caseFn(l.sub))}</span>` : ""}`;
+}
+function toggleNode(row, kids, loader) {
+  const open = row.getAttribute("aria-expanded") === "true";
+  row.setAttribute("aria-expanded", String(!open));
+  kids.classList.toggle("open", !open);
+  if (!open && !kids.dataset.loaded) { kids.dataset.loaded = "1"; loader(); }
+}
+
+async function renderBrowseTree() {
+  const wrap = $("browse-tree");
+  if (!conn) return;
+  const minCode = levelFloor();
+  const res = await conn.query(`
+    SELECT theme_id, any_value(theme_pl) AS theme_pl, any_value(theme_en) AS theme_en,
+           count(DISTINCT subjectId) AS n
+    FROM codebook WHERE unit_level >= ${minCode} AND theme_id IS NOT NULL
+    GROUP BY theme_id ORDER BY 2`);
+  const rows = res.toArray().map(r => r.toJSON());
+  wrap.innerHTML = "";
+  for (const th of rows) {
+    const row = treeRow("tree-theme", labelHtml(th.theme_pl, th.theme_en, sentenceCase),
+      `<span class="tree-count">${t("topics_n", Number(th.n))}</span>`, true);
+    const kids = document.createElement("div");
+    kids.className = "tree-kids";
+    row.addEventListener("click", () => toggleNode(row, kids, () => loadGroups(th.theme_id, kids)));
+    wrap.appendChild(row); wrap.appendChild(kids);
+  }
+}
+
+async function loadGroups(themeId, container) {
+  const minCode = levelFloor();
+  const res = await conn.query(`
+    SELECT group_id, any_value(group_pl) AS group_pl, any_value(group_en) AS group_en,
+           count(DISTINCT subjectId) AS n
+    FROM codebook WHERE theme_id = ${sqlQuote(themeId)} AND unit_level >= ${minCode}
+      AND group_id IS NOT NULL
+    GROUP BY group_id ORDER BY 2`);
+  const rows = res.toArray().map(r => r.toJSON());
+  container.innerHTML = "";
+  for (const g of rows) {
+    const row = treeRow("tree-group", labelHtml(g.group_pl, g.group_en, sentenceCase),
+      `<span class="tree-count">${t("topics_n", Number(g.n))}</span>`, true);
+    const kids = document.createElement("div");
+    kids.className = "tree-kids";
+    row.addEventListener("click", () => toggleNode(row, kids, () => loadSubjects(g.group_id, kids)));
+    container.appendChild(row); container.appendChild(kids);
+  }
+}
+
+async function loadSubjects(groupId, container) {
+  const minCode = levelFloor();
+  const res = await conn.query(`
+    SELECT subjectId, any_value(subject_name) AS pl, any_value(subject_name_en) AS en,
+           count(*) AS n_vars
+    FROM codebook WHERE group_id = ${sqlQuote(groupId)} AND unit_level >= ${minCode}
+    GROUP BY subjectId ORDER BY 2`);
+  const rows = res.toArray().map(r => r.toJSON());
+  container.innerHTML = "";
+  for (const sj of rows) {
+    const n = Number(sj.n_vars);
+    const row = treeRow("tree-subject", labelHtml(sj.pl, sj.en),
+      `<span class="tree-count">${n > 1 ? t("breakdowns", n) : t("single_series")}</span>`, false);
+    row.dataset.subject = sj.subjectId;
+    row.addEventListener("click", () => {
+      document.querySelectorAll(".tree-subject.is-active").forEach(e => e.classList.remove("is-active"));
+      row.classList.add("is-active");
+      openSubject(sj.subjectId, sj.pl);
+    });
+    container.appendChild(row);
+  }
 }
 
 // ---------- unit search ----------
@@ -646,6 +785,7 @@ function updateRunState() {
   // cart header
   const n = state.vars.size;
   $("cart-head").hidden = n === 0;
+  $("cart-empty").hidden = n > 0;
   $("cart-count").textContent = t("cart_count", n);
   // run button
   const hasLevel = selectedLevels().length > 0;
@@ -1140,9 +1280,9 @@ $("level-checks").addEventListener("change", () => {
   const codes = new Set(selectedLevels().map(l => LEVEL_CODES[l]));
   for (const [id, u] of state.units) if (u.level && !codes.has(u.level)) state.units.delete(id);
   renderUnitChips();
-  $("subj-results").hidden = true; $("unit-results").hidden = true;
-  $("facet-panel").hidden = true; facetState = null;
+  $("unit-results").hidden = true;
   updateRunState();
+  renderBrowseTree();
   if ($("var-search").value.trim().length >= 2) searchSubjects($("var-search").value);
 });
 $("cart-clear").addEventListener("click", () => {
@@ -1160,9 +1300,7 @@ $("toggle-view").addEventListener("click", () => {
 document.querySelectorAll("[data-lang-btn]").forEach(b =>
   b.addEventListener("click", () => setLang(b.dataset.langBtn)));
 document.addEventListener("click", ev => {
-  // keep the subject dropdown open while interacting with the facet panel
-  if (!ev.target.closest("#panel-vars")) $("subj-results").hidden = true;
-  if (!ev.target.closest("#panel-scope")) $("unit-results").hidden = true;
+  if (!ev.target.closest("#pane-cart")) $("unit-results").hidden = true;
 });
 
 init();

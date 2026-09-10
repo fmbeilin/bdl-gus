@@ -317,3 +317,89 @@ input:disabled { opacity: 0.55; }
 
 .panel-about p { color: var(--text-secondary); font-size: 13.5px; }
 .attribution { font-size: 12.5px !important; color: var(--text-muted) !important; }
+
+/* ===== workspace layout (v8): browse | detail | cart ===== */
+.workspace {
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr) 360px;
+  gap: 14px;
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 14px 18px 0;
+  height: calc(100vh - 92px);
+  min-height: 520px;
+}
+.pane {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;                 /* let children scroll */
+  overflow: hidden;
+}
+.pane-head {
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.pane-title { margin: 0; font-size: 14.5px; font-weight: 650; display: flex; align-items: center; gap: 2px; }
+.pane-sticky { padding: 12px 14px 8px; flex: none; border-bottom: 1px solid var(--border); }
+.pane-browse > #subj-results, .pane-browse > #browse-tree { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+.pane-browse > #subj-results { border: 0; border-radius: 0; max-height: none; }
+.pane-detail { padding: 0; }
+.pane-detail > #facet-panel { margin: 0; border: 0; border-radius: 0; background: transparent; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+.pane-cart { overflow-y: auto; }
+.pane-cart > .cart-head, .pane-cart > #var-chips, .pane-cart > #cart-empty { padding-left: 14px; padding-right: 14px; }
+.pane-cart > .cart-head { margin-top: 12px; padding-top: 0; border-top: 0; }
+
+.detail-empty { padding: 40px 28px; color: var(--text-muted); font-size: 14px; line-height: 1.6; max-width: 460px; }
+.cart-empty { color: var(--text-muted); font-size: 13px; padding: 14px; }
+
+.scope-block { padding: 14px; margin-top: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 14px; }
+.scope-block .level-checks { flex-direction: column; gap: 5px; }
+.scope-block .field > span:first-child { font-size: 12.5px; }
+.cart-foot {
+  position: sticky; bottom: 0;
+  padding: 12px 14px; margin-top: auto;
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.cart-foot .run-btn { width: 100%; }
+
+/* browse tree */
+.browse-tree { padding: 6px 0 14px; }
+.tree-row {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 14px; border: 0; background: transparent; color: var(--text-primary);
+  font: inherit; text-align: left; cursor: pointer; line-height: 1.35;
+}
+.tree-row:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.tree-theme { font-size: 13.5px; font-weight: 600; }
+.tree-group { font-size: 13px; padding-left: 30px; color: var(--text-secondary); }
+.tree-subject { font-size: 13px; padding-left: 46px; }
+.tree-subject.is-active { background: color-mix(in srgb, var(--accent) 16%, transparent); font-weight: 600; }
+.tree-chev { flex: none; width: 12px; color: var(--text-muted); font-size: 10px; transition: transform .12s; }
+.tree-row[aria-expanded="true"] .tree-chev { transform: rotate(90deg); }
+.tree-label { flex: 1 1 auto; min-width: 0; }
+.tree-label .tree-sub { display: block; color: var(--text-muted); font-size: 11.5px; font-style: italic; font-weight: 400; }
+.tree-count { flex: none; color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.tree-kids { display: none; }
+.tree-kids.open { display: block; }
+
+/* search-result breadcrumb (shows which family a hit belongs to) */
+.subj-crumb { display: block; color: var(--text-muted); font-size: 11.5px; margin-top: 2px; }
+.pane-browse .subj-row { padding: 8px 14px; }
+.pane-browse .subj-meta { font-size: 11.5px; }
+
+/* detail pane header inside facet panel */
+.facet-crumb { color: var(--text-muted); font-size: 12px; margin-bottom: 4px; }
+
+.below { max-width: 1680px; margin: 0 auto; padding: 14px 18px 56px; }
+
+@media (max-width: 1180px) {
+  .workspace { grid-template-columns: 1fr; height: auto; }
+  .pane { max-height: 70vh; }
+  .cart-foot { position: static; }
+}

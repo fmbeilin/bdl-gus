@@ -4,53 +4,73 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GUS BDL Explorer</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=8">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
 </head>
 <body>
 <header class="topbar">
   <div class="topbar-inner">
     <h1>GUS BDL Explorer</h1>
-    <p class="tagline" data-i18n="tagline">Polish Local Data Bank — 1.26 billion observations, queried live in your browser</p>
+    <p class="tagline" data-i18n="tagline">Polish Local Data Bank</p>
   </div>
   <div class="topbar-right">
     <div class="lang-toggle" role="group" aria-label="Language">
       <button type="button" data-lang-btn="en">EN</button>
       <button type="button" data-lang-btn="pl">PL</button>
     </div>
-    <div id="status" class="status status-loading" data-i18n="st_starting">Starting DuckDB…</div>
+    <div id="status" class="status status-loading" data-i18n="st_starting">Starting…</div>
   </div>
 </header>
 
-<main>
-  <!-- Step 1: find data (subject-first) -->
-  <section class="panel" id="panel-vars">
-    <h2><span class="step">1</span> <span data-i18n="find_data">Find data</span></h2>
-    <input type="search" id="var-search" data-i18n-ph="search_ph" placeholder="Search a topic in English or Polish…" autocomplete="off" disabled>
-    <div id="quick-starts" class="quick-starts"></div>
+<main class="workspace">
+  <!-- LEFT: browse / search -->
+  <section class="pane pane-browse" id="pane-browse">
+    <div class="pane-head">
+      <h2 class="pane-title"><span class="step">1</span> <span data-i18n="browse_title">Find a topic</span></h2>
+    </div>
+    <div class="pane-sticky">
+      <input type="search" id="var-search" data-i18n-ph="search_ph" placeholder="Search…" autocomplete="off" disabled>
+      <div id="quick-starts" class="quick-starts"></div>
+    </div>
     <div id="subj-results" class="var-results" hidden></div>
+    <div id="browse-tree" class="browse-tree"></div>
+  </section>
+
+  <!-- MIDDLE: subject detail / breakdown picker -->
+  <section class="pane pane-detail" id="pane-detail">
+    <div class="pane-head">
+      <h2 class="pane-title"><span class="step">2</span> <span data-i18n="detail_title">Choose breakdowns</span></h2>
+    </div>
+    <div id="detail-empty" class="detail-empty">
+      <p data-i18n="detail_empty">Pick a topic on the left to choose exactly which breakdowns you want.</p>
+    </div>
     <div id="facet-panel" class="facet-panel" hidden></div>
+  </section>
+
+  <!-- RIGHT: cart + scope -->
+  <aside class="pane pane-cart" id="pane-cart">
+    <div class="pane-head">
+      <h2 class="pane-title"><span class="step">3</span> <span data-i18n="your_dataset">Your dataset</span></h2>
+    </div>
+
     <div class="cart-head" id="cart-head" hidden>
       <span id="cart-count">Your dataset</span>
       <button id="cart-clear" class="cart-clear" type="button" data-i18n="clear_all">Clear all</button>
     </div>
+    <div id="cart-empty" class="cart-empty" data-i18n="cart_empty">No indicators yet — add some from the middle panel.</div>
     <div id="var-chips" class="chips"></div>
-  </section>
 
-  <!-- Step 2: scope -->
-  <section class="panel" id="panel-scope">
-    <h2><span class="step">2</span> <span data-i18n="choose_scope">Choose scope</span></h2>
-    <div class="field">
-      <span><span data-i18n="geo_levels">Geographic levels</span> <span class="hint" data-i18n="tick_hint">(tick one or more)</span></span>
-      <div id="level-checks" class="level-checks">
-        <label><input type="checkbox" value="gminy" checked> Gminy (LAU-2) <span class="lvl-note" data-gloss="gl_municipalities">municipalities</span></label>
-        <label><input type="checkbox" value="powiaty"> Powiaty (LAU-1) <span class="lvl-note" data-gloss="gl_counties">counties</span></label>
-        <label><input type="checkbox" value="podregiony"> Podregiony (NUTS-3) <span class="lvl-note" data-gloss="gl_subregions">subregions</span></label>
-        <label><input type="checkbox" value="wojewodztwa"> Województwa (NUTS-2) <span class="lvl-note" data-gloss="gl_voivodeships">voivodeships</span></label>
-        <label><input type="checkbox" value="makroregiony"> Makroregiony (NUTS-1)</label>
+    <div class="scope-block">
+      <div class="field">
+        <span><span data-i18n="geo_levels">Geographic levels</span> <span class="hint" data-i18n="tick_hint">(tick one or more)</span></span>
+        <div id="level-checks" class="level-checks">
+          <label><input type="checkbox" value="gminy" checked> Gminy (LAU-2) <span class="lvl-note" data-gloss="gl_municipalities">municipalities</span></label>
+          <label><input type="checkbox" value="powiaty"> Powiaty (LAU-1) <span class="lvl-note" data-gloss="gl_counties">counties</span></label>
+          <label><input type="checkbox" value="podregiony"> Podregiony (NUTS-3) <span class="lvl-note" data-gloss="gl_subregions">subregions</span></label>
+          <label><input type="checkbox" value="wojewodztwa"> Województwa (NUTS-2) <span class="lvl-note" data-gloss="gl_voivodeships">voivodeships</span></label>
+          <label><input type="checkbox" value="makroregiony"> Makroregiony (NUTS-1)</label>
+        </div>
       </div>
-    </div>
-    <div class="scope-row">
       <label class="field">
         <span data-i18n="years">Years</span>
         <span class="year-pair">
@@ -59,25 +79,26 @@
           <input type="number" id="year-to" data-i18n-ph="year_to" placeholder="to" min="1995" max="2024">
         </span>
       </label>
+      <label class="field">
+        <span><span data-i18n="units">Units</span> <span class="hint" data-i18n="units_hint">(empty = all)</span></span>
+        <input type="search" id="unit-search" data-i18n-ph="unit_search_ph" placeholder="Search units…" autocomplete="off" disabled>
+      </label>
+      <div id="unit-results" class="var-results" hidden></div>
+      <div id="unit-chips" class="chips"></div>
     </div>
-    <label class="field">
-      <span><span data-i18n="units">Units</span> <span class="hint" data-i18n="units_hint">(empty = all units at the selected levels)</span></span>
-      <input type="search" id="unit-search" data-i18n-ph="unit_search_ph" placeholder="Search units…" autocomplete="off" disabled>
-    </label>
-    <div id="unit-results" class="var-results" hidden></div>
-    <div id="unit-chips" class="chips"></div>
-  </section>
 
-  <!-- Step 3: run -->
-  <section class="panel panel-run">
-    <button id="run-btn" class="run-btn" disabled data-i18n="build_dataset">Build dataset</button>
-    <span id="run-note" class="hint"></span>
-  </section>
+    <div class="cart-foot">
+      <button id="run-btn" class="run-btn" disabled data-i18n="build_dataset">Build dataset</button>
+      <span id="run-note" class="hint"></span>
+    </div>
+  </aside>
+</main>
 
+<div class="below">
   <!-- Results -->
   <section class="panel" id="panel-results" hidden>
     <div class="results-head">
-      <h2 id="results-title" data-i18n="your_dataset">Your dataset</h2>
+      <h2 id="results-title" data-i18n="results_title">Preview &amp; download</h2>
       <div class="results-actions">
         <button id="toggle-view" class="ghost-btn" aria-pressed="false" data-i18n="table_view">Table view</button>
       </div>
@@ -86,16 +107,16 @@
     <div class="download-bar" id="download-bar">
       <div class="dl-group">
         <span class="dl-label" data-i18n="layout">Layout</span>
-        <label class="dl-opt"><input type="radio" name="dl-layout" value="long" checked> <span data-i18n="long">Long</span> <span class="hint" data-i18n="long_hint">(one row per observation)</span></label>
-        <label class="dl-opt"><input type="radio" name="dl-layout" value="wide"> <span data-i18n="wide">Wide</span> <span class="hint" data-i18n="wide_hint">(one column per indicator)</span></label>
+        <label class="dl-opt"><input type="radio" name="dl-layout" value="long" checked> <span data-i18n="long">Long</span> <span class="hint" data-i18n="long_hint"></span></label>
+        <label class="dl-opt"><input type="radio" name="dl-layout" value="wide"> <span data-i18n="wide">Wide</span> <span class="hint" data-i18n="wide_hint"></span></label>
       </div>
       <div class="dl-group">
         <span class="dl-label" data-i18n="data_files">Data files</span>
-        <label class="dl-opt"><input type="radio" name="dl-format" value="combined" checked> <span data-i18n="one_file">One file</span> <span class="hint" data-i18n="one_file_hint">(level in a column)</span></label>
+        <label class="dl-opt"><input type="radio" name="dl-format" value="combined" checked> <span data-i18n="one_file">One file</span> <span class="hint" data-i18n="one_file_hint"></span></label>
         <label class="dl-opt" id="dl-opt-separate"><input type="radio" name="dl-format" value="separate"> <span data-i18n="per_level">Per level</span></label>
       </div>
       <div class="dl-group">
-        <label class="dl-opt"><input type="checkbox" id="dl-docs" checked> <span data-i18n="incl_docs">Include codebook &amp; README</span> <span class="hint" data-i18n="incl_docs_hint">(as .zip)</span></label>
+        <label class="dl-opt"><input type="checkbox" id="dl-docs" checked> <span data-i18n="incl_docs">Include codebook &amp; README</span> <span class="hint" data-i18n="incl_docs_hint"></span></label>
       </div>
       <div class="dl-group dl-go">
         <span id="dl-estimate" class="dl-estimate"></span>
@@ -117,13 +138,12 @@
     <h2 data-i18n="about">About</h2>
     <p data-i18n-html="about_body"></p>
     <p><span data-i18n="bulk_data">Bulk data:</span> <span id="data-source-note"></span></p>
-    <p class="attribution" data-i18n="attribution">Data source: Główny Urząd Statystyczny (Statistics Poland), Bank Danych Lokalnych, bdl.stat.gov.pl.
-    This is an independent interface, not affiliated with or endorsed by GUS.</p>
+    <p class="attribution" data-i18n="attribution">Data source: Główny Urząd Statystyczny, Bank Danych Lokalnych.</p>
   </section>
-</main>
+</div>
 
 <!-- Bump ?v= whenever app.js changes so returning visitors don't run a cached
      app.js against fresh HTML (GitHub Pages caches assets ~10 min). -->
-<script type="module" src="app.js?v=7"></script>
+<script type="module" src="app.js?v=8"></script>
 </body>
 </html>
