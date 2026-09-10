@@ -116,6 +116,8 @@ const I18N = {
     no_units: "No units match at the selected level(s).",
     // table
     th_variable: "Variable", th_unit: "Unit", th_unitid: "Unit ID", th_level: "Level", th_year: "Year", th_value: "Value",
+    th_flag: "Flag",
+    breaks_warn: n => `<strong>Series break:</strong> ${fmt.format(n)} observation${n === 1 ? "" : "s"} in this dataset are flagged by GUS as affected by <em>methodological changes</em>. Values before and after a flagged year may not be comparable. The flag travels with the data (see the <code>attr_*</code> columns in the long-format download).`,
     table_note: (shown, total) => `Showing first ${fmt.format(shown)} of ${fmt.format(total)} rows — download for the full dataset.`,
     // chart
     chart_top: (m, total) => `Showing the ${m} series with the highest average value out of ${fmt.format(total)}. The table and download contain everything.`,
@@ -182,6 +184,8 @@ const I18N = {
     tick_level_first: "Najpierw zaznacz poziom terytorialny.",
     no_units: "Brak jednostek na wybranych poziomach.",
     th_variable: "Wskaźnik", th_unit: "Jednostka", th_unitid: "Kod jednostki", th_level: "Poziom", th_year: "Rok", th_value: "Wartość",
+    th_flag: "Flaga",
+    breaks_warn: n => `<strong>Przerwa w szeregu:</strong> ${fmt.format(n)} ${plForm(n, "obserwacja jest oznaczona", "obserwacje są oznaczone", "obserwacji jest oznaczonych")} przez GUS jako objęte <em>zmianami metodologicznymi</em>. Wartości sprzed i po oznaczonym roku mogą nie być porównywalne. Flaga jest zapisana w danych (kolumny <code>attr_*</code> w układzie długim).`,
     table_note: (shown, total) => `Pokazano pierwsze ${fmt.format(shown)} z ${fmt.format(total)} wierszy — pobierz pełny zbiór.`,
     chart_top: (m, total) => `Pokazano ${m} szeregów o najwyższej średniej wartości z ${fmt.format(total)}. Tabela i plik zawierają wszystko.`,
     chart_mixed: units => `Wybrane wskaźniki mają różne jednostki miary (${units}); wykres używa jednej osi — porównuj ostrożnie lub użyj tabeli.`,
@@ -250,6 +254,9 @@ async function init() {
     catch { hasEn = false; }
     try { await conn.query(`CREATE TABLE variables_en AS SELECT * FROM read_parquet('${DATA_BASE}/variables_en.parquet')`); }
     catch { hasVarEn = false; }
+    // Observation attribute flags (methodological breaks, confidentiality, ...).
+    try { await conn.query(`CREATE TABLE attributes AS SELECT * FROM read_parquet('${DATA_BASE}/attributes.parquet')`); }
+    catch { await conn.query(`CREATE TABLE attributes (attr_id INTEGER, symbol VARCHAR, description_pl VARCHAR, description_en VARCHAR, is_break BOOLEAN)`); }
     // Subject hierarchy (theme -> group -> subject) powers browsing by family.
     let hasTree = true;
     try { await conn.query(`CREATE TABLE subject_tree AS SELECT * FROM read_parquet('${DATA_BASE}/subject_tree.parquet')`); }
@@ -295,6 +302,7 @@ async function init() {
     $("var-search").disabled = false;
     $("unit-search").disabled = false;
     updateDataSourceNote();
+    await loadAttrMeanings();
     await renderBrowseTree();
     updateRunState();
     setStatus("ready", t("st_ready"));
@@ -322,6 +330,7 @@ function setLang(lang) {
   updateRunState();
   $("toggle-view").textContent = $("table-wrap").hidden ? t("table_view") : t("chart_view");
   if (conn && statusEl.classList.contains("status-ready")) setStatus("ready", t("st_ready"));
+  loadAttrMeanings().then(() => { if (!$("panel-results").hidden && state.preview) refreshResults(); });
   renderBrowseTree();
   if (facetState) renderFacetPanel();
   if ($("var-search").value.trim().length >= 2) searchSubjects($("var-search").value);
@@ -609,6 +618,21 @@ function addFacetSelection() {
   updateRunState();
 }
 
+// ---------- observation attribute flags ----------
+const ATTR_MEANING = {};   // attr_id -> {symbol, desc, isBreak}; ids 0/1 mean "no flag"
+async function loadAttrMeanings() {
+  try {
+    const r = await conn.query("SELECT attr_id, symbol, description_pl, description_en, is_break FROM attributes");
+    for (const k of Object.keys(ATTR_MEANING)) delete ATTR_MEANING[k];
+    for (const a of r.toArray().map(x => x.toJSON())) {
+      const desc = LANG === "pl" ? a.description_pl : a.description_en;
+      if (!desc || !String(desc).trim()) continue;
+      ATTR_MEANING[Number(a.attr_id)] = {
+        symbol: (a.symbol || "").trim(), desc: String(desc), isBreak: !!a.is_break };
+    }
+  } catch { /* attributes table absent -> no flags shown */ }
+}
+
 // ---------- browse tree (theme -> group -> subject) ----------
 // GUS theme/group names arrive SHOUTED; sentence-case them for reading.
 const ACRONYMS = ["PKD", "NSP", "NTS", "NUTS", "LAU", "UE", "EU", "GUS", "BAEL", "PKB",
@@ -815,7 +839,7 @@ function buildWhere() {
 function levelSelect(level, snap) {
   const files = filesFor(level, snap.varKeys);
   const fileListSql = `[${files.map(sqlQuote).join(",")}]`;
-  return `SELECT variable_id, unitId, unitName, unitLevel, year, value ` +
+  return `SELECT variable_id, unitId, unitName, unitLevel, year, value, attr_id ` +
     `FROM read_parquet(${fileListSql}) WHERE ${snap.where}`;
 }
 
@@ -834,8 +858,12 @@ async function runQuery() {
     const res = await conn.query(
       `SELECT * FROM (${inner}) ORDER BY variable_id, unitLevel DESC, unitId, year LIMIT ${PREVIEW_LIMIT}`);
     const rows = res.toArray().map(r => r.toJSON());
+    // GUS flags methodologically-broken observations; count them so we can warn
+    const breaks = Number((await conn.query(
+      `SELECT count(*) AS n FROM (${inner}) d
+       WHERE d.attr_id IN (SELECT attr_id FROM attributes WHERE is_break)`)).toArray()[0].toJSON().n);
     // remember for re-rendering (e.g. on language switch) without re-querying
-    state.preview = { rows, total, nUnits: state.units.size, nLevels: levels.length, level1: levels[0] };
+    state.preview = { rows, total, breaks, nUnits: state.units.size, nLevels: levels.length, level1: levels[0] };
     $("panel-results").hidden = false;
     refreshResults();
     setSeparateEnabled(levels.length > 1);
@@ -857,6 +885,9 @@ function refreshResults() {
   const lvlLabel = p.nLevels === 1 ? LEVEL_LABEL[p.level1] : t("lvls_n", p.nLevels);
   const unitsDesc = (p.nUnits || 0) === 0 ? t("units_all") : t("units_n", p.nUnits);
   $("result-summary").textContent = t("summary", p.total, state.snapshot.varKeys.length, lvlLabel, unitsDesc);
+  const bw = $("break-warn");
+  if (p.breaks > 0) { bw.innerHTML = t("breaks_warn", p.breaks); bw.hidden = false; }
+  else bw.hidden = true;
   renderChart(p.rows);
   renderTable(p.rows, p.total);
   showEstimate(p.total);
@@ -1077,12 +1108,17 @@ function renderTable(rows, total) {
   const multiLvl = (state.snapshot?.levels.length || 1) > 1;
   const varName = id => { const v = state.vars.get(Number(id)); return v ? varLabel(v) : id; };
   const lvlHead = multiLvl ? `<th>${t("th_level")}</th>` : "";
+  const anyFlag = shown.some(r => ATTR_MEANING[Number(r.attr_id)]);
+  const flagHead = anyFlag ? `<th>${t("th_flag")}</th>` : "";
   tbl.innerHTML =
-    `<thead><tr><th>${t("th_variable")}</th><th>${t("th_unit")}</th><th>${t("th_unitid")}</th>${lvlHead}<th>${t("th_year")}</th><th>${t("th_value")}</th></tr></thead>` +
-    `<tbody>` + shown.map(r =>
-      `<tr><td>${esc(truncate(varName(r.variable_id), 70))}</td><td>${esc(r.unitName)}</td><td>${r.unitId}</td>` +
-      `${multiLvl ? `<td>${LEVEL_NAME[r.unitLevel] || r.unitLevel}</td>` : ""}` +
-      `<td class="num">${r.year}</td><td class="num">${fmtVal(r.value)}</td></tr>`).join("") + `</tbody>`;
+    `<thead><tr><th>${t("th_variable")}</th><th>${t("th_unit")}</th><th>${t("th_unitid")}</th>${lvlHead}<th>${t("th_year")}</th><th>${t("th_value")}</th>${flagHead}</tr></thead>` +
+    `<tbody>` + shown.map(r => {
+      const a = ATTR_MEANING[Number(r.attr_id)];
+      return `<tr><td>${esc(truncate(varName(r.variable_id), 70))}</td><td>${esc(r.unitName)}</td><td>${r.unitId}</td>` +
+        `${multiLvl ? `<td>${LEVEL_NAME[r.unitLevel] || r.unitLevel}</td>` : ""}` +
+        `<td class="num">${r.year}</td><td class="num">${fmtVal(r.value)}</td>` +
+        `${anyFlag ? `<td>${a ? `<span class="attr-flag${a.isBreak ? " is-break" : ""}" title="${esc(a.desc)}">${esc(a.symbol || "•")}</span>` : ""}</td>` : ""}</tr>`;
+    }).join("") + `</tbody>`;
   total = total ?? rows.length;
   $("table-note").textContent = total > shown.length ? t("table_note", shown.length, total) : "";
 }
@@ -1099,8 +1135,11 @@ const LEVEL_CASE =
 function wrapExportLong(innerSql) {
   return `WITH d AS (${innerSql}) ` +
     `SELECT d.variable_id, c.variable_full_name AS variable_name, d.unitId, d.unitName, ` +
-    `d.unitLevel, ${LEVEL_CASE} AS level, d.year, d.value ` +
+    `d.unitLevel, ${LEVEL_CASE} AS level, d.year, d.value, ` +
+    `d.attr_id AS attr_id, a.symbol AS attr_symbol, ` +
+    `a.description_en AS attr_note_en, coalesce(a.is_break, false) AS attr_is_break ` +
     `FROM d LEFT JOIN codebook c USING (variable_id) ` +
+    `LEFT JOIN attributes a ON d.attr_id = a.attr_id ` +
     `ORDER BY d.variable_id, d.unitLevel DESC, d.unitId, d.year`;
 }
 // Wide: one column per indicator; rows keyed by unit × year.
@@ -1167,7 +1206,12 @@ function buildReadme(snap, layout, stamp, dataFileList) {
   unitLevel     6=gmina, 5=powiat, 4=podregion, 2=wojewodztwo, 1=makroregion
   level         Readable level name
   year          Year
-  value         Observed value`;
+  value         Observed value
+  attr_id       GUS observation flag id (0/1 = none)
+  attr_symbol   GUS flag symbol, e.g. M = methodological changes
+  attr_note_en  What the flag means
+  attr_is_break TRUE where the flag denotes a methodological change (series break):
+                values either side of it may not be comparable`;
   return `GUS BDL — custom dataset
 Generated ${stamp} with the GUS BDL Explorer
 https://fmbeilin.github.io/bdl-gus/webapp/

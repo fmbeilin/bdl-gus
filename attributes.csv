@@ -1,0 +1,19 @@
+attr_id,symbol,description_pl,description_en,is_break
+0,,,,0
+1,,,,0
+3,k,Agregat może być niekompletny,Aggregate may be incomplete,0
+4,x,"Brak informacji, konieczność zachowania tajemnicy statystycznej lub wypełnienie pozycji jest niemożliwe albo niecelowe","Data not available, classified data (statistical confidentiality) or providing data impossible or purposeless",0
+7,a,Wartość mniejsza niż przyjęty format prezentacji,Value less then approved presentation format,0
+9,s,Szacunki wstępne,Preliminary estimates,0
+11,M,Zmiany metodologiczne,Methodological changes,1
+13,K,"Zmiany metodologiczne, agregat może być niekompletny","Methodological changes, aggregate may be incomplete",1
+14,X,"Zmiany metodologiczne, brak informacji, konieczność zachowania tajemnicy statystycznej lub wypełnienie pozycji jest niemożliwe albo niecelowe","Methodological changes, data not available, classified data (statistical confidentiality) or providing data impossible or purposeless",1
+15,,"Znak '-' oznacza brak informacji z powodu: zmiany poziomu prezentacji, zmian wprowadzonych do wykazu jednostek terytorialnych lub modyfikacji listy cech w danym okresie sprawozdawczym",The '-' sign means no information due to: changes in the level of presentation or in the list of territorial units or modification of the list of variables in a given statistical period,0
+17,A,"Zmiany metodologiczne, wartość mniejsza niż przyjęty format prezentacji","Methodological changes, value less then approved presentation format",1
+20,v,Dane o niskiej precyzji,Low-precision data,0
+21,v,Dane o niskiej precyzji,Low-precision data,0
+50,n,"Dana jeszcze niedostępna, będzie dostępna","Data is not available yet, will be available",0
+91,x,"Brak informacji, konieczność zachowania tajemnicy statystycznej lub wypełnienie pozycji jest niemożliwe albo niecelowe","Data not available, classified data (statistical confidentiality) or providing data impossible or purposeless",0
+94,z,"Wartość znacząca, wartość zerowa wynika z bilansu niezerowych danych wejściowych algorytmu, np. przyrost naturalny, jeśli liczba zgonów jest równa liczbie urodzeń","Significant value, the zero result of non-zero input data of the algorithm, e.g. zero natural increase, if the number of deaths is equal to the number of births",0
+97,p,Łącznie dla powiatu i miasta na prawach powiatu,Including data for the powiat and the city with powiat status,0
+98,Z,"Zmiany metodologiczne, wartość znacząca, wartość zerowa wynika z bilansu niezerowych danych wejściowych algorytmu, np. przyrost naturalny, jeśli liczba zgonów jest równa liczbie urodzeń","Methodological changes, significant value, the zero result of non-zero input data of the algorithm, e.g. zero natural increase, if the number of deaths is equal to the number of births",1
