@@ -611,11 +611,16 @@ function addFacetSelection() {
 
 // ---------- browse tree (theme -> group -> subject) ----------
 // GUS theme/group names arrive SHOUTED; sentence-case them for reading.
+const ACRONYMS = ["PKD", "NSP", "NTS", "NUTS", "LAU", "UE", "EU", "GUS", "BAEL", "PKB",
+  "VAT", "PIT", "CIT", "ZUS", "KRUS", "OZE", "AWU", "RP", "ICT", "B+R", "PSR"];
 function sentenceCase(str) {
   if (!str) return "";
   if (/[a-ząćęłńóśźż]/.test(str)) return str;          // already mixed case
   const low = str.toLocaleLowerCase("pl");
-  return low.charAt(0).toLocaleUpperCase("pl") + low.slice(1);
+  let out = low.charAt(0).toLocaleUpperCase("pl") + low.slice(1);
+  for (const a of ACRONYMS)                            // sentence-casing eats acronyms
+    out = out.replace(new RegExp(`\\b${a.replace("+", "\\+")}\\b`, "gi"), a);
+  return out;
 }
 // Coarsest selected level decides what's available (see searchSubjects).
 function levelFloor() {
