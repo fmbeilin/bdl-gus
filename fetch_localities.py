@@ -9,9 +9,12 @@ which cuts the sweep from ~19M requests (per-gmina) to ~3.4M (per-macroregion).
 Each returned row carries a locality's FULL year series, and page-size caps at
 100, so one request yields ~100 localities x ~18 years.
 
-Rate limit is 50k requests per key per rolling 7 days; keys rotate and exhausted
-keys drop out. Progress is checkpointed per (variable, macroregion) so the run
-resumes exactly where it stopped — expect this to span several weeks on 3 keys.
+MEASURED: the 50k/key/7d rate limit applies to METADATA endpoints only — /data/*
+requests do not decrement it. The binding constraint is throughput, and the
+server throttles above ~10 concurrent workers (50 workers is slower AND starts
+failing), so ~10-14 workers at ~15-20 req/s is the sweet spot => roughly 2-4 days
+of continuous running for the full sweep. Keys still rotate; progress is
+checkpointed per variable so the run resumes exactly where it stopped.
 
 CSV shards are converted to parquet and deleted as we go (the full raw CSV would
 not fit on disk).

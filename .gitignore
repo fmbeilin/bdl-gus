@@ -32,3 +32,9 @@ wykleci_gminy_population.csv
 subjects_en.csv
 variables_en.csv
 subject_tree.csv
+
+# API keys (never commit)
+.bdl_keys
+localities_shards/
+localities_done.txt
+attributes.csv
