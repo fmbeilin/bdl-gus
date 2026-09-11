@@ -56,6 +56,26 @@ PLISTEOF
 
 plutil -lint "$PLIST" >/dev/null && echo "==> plist valid: $PLIST"
 
+# CRITICAL: bootstrap_desktop.sh already started a detached copy. Leaving it
+# running while launchd starts another doubles the request rate against GUS,
+# which is exactly what got this client TCP-blocked before. Stop it first.
+if pgrep -f "run_localities.sh" >/dev/null 2>&1 || pgrep -f "fetch_localities.py" >/dev/null 2>&1; then
+  echo "==> stopping the existing (non-launchd) copy first"
+  pkill -f "run_localities.sh" 2>/dev/null || true
+  sleep 2
+  pkill -f "fetch_localities.py" 2>/dev/null || true
+  sleep 3
+fi
+for i in 1 2 3 4 5; do
+  pgrep -f "fetch_localities.py" >/dev/null 2>&1 || break
+  echo "    waiting for it to exit..."; sleep 3
+done
+if pgrep -f "fetch_localities.py" >/dev/null 2>&1; then
+  echo "!! an extractor is still running; refusing to start a second one."
+  echo "   kill it manually (pkill -9 -f fetch_localities.py) and re-run this."
+  exit 1
+fi
+
 # reload cleanly if it was already installed
 launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$UID" "$PLIST"
