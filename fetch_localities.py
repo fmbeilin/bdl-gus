@@ -178,6 +178,33 @@ dbDisconnect(con, shutdown=TRUE)
     os.remove(path)
     return True
 
+def _variables_in_parquet():
+    """Which variable_ids are already present in lake_v2/facts_localities?"""
+    d = os.path.join(ROOT, "lake_v2", "facts_localities")
+    if not os.path.isdir(d):
+        return set()
+    # Only real parts: macOS writes AppleDouble '._part-*.parquet' sidecars on
+    # exFAT volumes, and a bare *.parquet glob makes DuckDB/pyarrow choke on them.
+    files = sorted(os.path.join(d, f) for f in os.listdir(d)
+                   if f.startswith("part-") and f.endswith(".parquet"))
+    if not files:
+        return set()
+    try:
+        import pyarrow.dataset as ds
+        tbl = ds.dataset(files, format="parquet").to_table(columns=["variable_id"])
+        return {str(v) for v in set(tbl.column("variable_id").to_pylist())}
+    except ImportError:
+        pass
+    r = subprocess.run(["Rscript", "-e",
+        f'library(duckdb);con<-dbConnect(duckdb());'
+        f'x<-dbGetQuery(con,"SELECT DISTINCT variable_id FROM read_parquet(\'{d}/part-*.parquet\')");'
+        f'cat(x$variable_id,sep="\n");dbDisconnect(con,shutdown=TRUE)'],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        print("  ! could not rebuild checkpoint from parquet", flush=True)
+        return None
+    return {l.strip() for l in r.stdout.split() if l.strip()}
+
 def main():
     os.makedirs(SHARD_DIR, exist_ok=True)
     lvl7 = [r["id"] for r in csv.DictReader(open(os.path.join(ROOT, "variables_catalog.csv")))
@@ -185,6 +212,17 @@ def main():
     done = set()
     if os.path.exists(DONE_FILE):
         done = {l.strip() for l in open(DONE_FILE) if l.strip()}
+    # A checkpoint is only ever trustworthy if it agrees with the parquet that
+    # exists. Rebuilding from the parquet lets a machine start from nothing but
+    # the downloaded data files (no checkpoint file needed) and repairs drift.
+    if os.environ.get("REBUILD_CHECKPOINT") == "1":
+        derived = _variables_in_parquet()
+        if derived is not None:
+            if derived != done:
+                print(f"  checkpoint rebuilt from parquet: {len(done)} -> {len(derived)}", flush=True)
+            done = derived
+            with open(DONE_FILE, "w") as f:
+                f.write("\n".join(sorted(done, key=int)) + ("\n" if done else ""))
     todo = [v for v in lvl7 if v not in done]
     print(f"level-7 variables: {len(lvl7):,} | done: {len(done):,} | todo: {len(todo):,}", flush=True)
 
