@@ -7,9 +7,10 @@
 # (which is what a fresh block, or the extractor's circuit breaker, looks like).
 #
 # Start:  nohup ./run_localities.sh >/dev/null 2>&1 &
+# Elsewhere: BDL_ROOT=/path/to/workdir nohup ./run_localities.sh &
 # Watch:  tail -f fetch_localities.log
 # Stop:   pkill -f run_localities.sh ; pkill -f fetch_localities.py
-cd "/Volumes/Samsung T72/Data/API GUS" || exit 1
+cd "${BDL_ROOT:-$(cd "$(dirname "$0")" && pwd)}" || exit 1
 export BDL_KEYS="$(cat .bdl_keys)"
 TOTAL=7713
 BACKOFF=300                 # grows to 6h while no progress is being made

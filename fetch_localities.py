@@ -25,7 +25,10 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
 BASE = "https://bdl.stat.gov.pl/api/v1"
-ROOT = "/Volumes/Samsung T72/Data/API GUS"
+# Portable: set BDL_ROOT to run this anywhere (e.g. a UPS-backed desktop that
+# can stay up for weeks). Only ~17MB of inputs are needed and the full output
+# is ~3.5GB, so the job does not need the original drive.
+ROOT = os.environ.get("BDL_ROOT") or os.path.dirname(os.path.abspath(__file__))
 SHARD_DIR = os.path.join(ROOT, "localities_shards")
 DONE_FILE = os.path.join(ROOT, "localities_done.txt")
 MACROS = ["010000000000", "020000000000", "030000000000", "040000000000",
@@ -129,10 +132,29 @@ def fetch_pair(job):
         page += 1
     return var, macro, out, True
 
+def _convert_with_pyarrow(path, out):
+    """Preferred on a ported machine: needs only `pip install pyarrow`."""
+    import pyarrow as pa, pyarrow.csv as pacsv, pyarrow.parquet as pq
+    schema = pa.schema([("variable_id", pa.int32()), ("unitId", pa.string()),
+                        ("unitName", pa.string()), ("parent_gmina", pa.string()),
+                        ("year", pa.int16()), ("value", pa.float64()),
+                        ("attr_id", pa.int8())])
+    tbl = pacsv.read_csv(path, convert_options=pacsv.ConvertOptions(column_types=schema))
+    pq.write_table(tbl, out, compression="zstd")
+
 def convert_shard(path, idx):
-    """CSV shard -> parquet part, then drop the CSV (disk would not hold them)."""
+    """CSV shard -> parquet part, then drop the CSV (disk would not hold them).
+    Uses pyarrow when available, else falls back to R+duckdb."""
     out = os.path.join(ROOT, "lake_v2", "facts_localities", f"part-{idx:05d}.parquet")
     os.makedirs(os.path.dirname(out), exist_ok=True)
+    try:
+        _convert_with_pyarrow(path, out)
+        os.remove(path)
+        return True
+    except ImportError:
+        pass          # no pyarrow -> use the R path below
+    except Exception as e:
+        print(f"  ! pyarrow convert failed ({e}); trying R", flush=True)
     r = f'''
 library(duckdb); con <- dbConnect(duckdb())
 dbExecute(con, "COPY (SELECT variable_id::INTEGER AS variable_id, unitId, unitName,
