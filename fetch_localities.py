@@ -41,6 +41,30 @@ _state = {k: 10**9 for k in KEYS}      # key -> remaining quota (optimistic unti
 _idx = [0]
 _lock = threading.Lock()
 
+# Sustained scraping got this client TCP-blocked by GUS once (connections to
+# stat.gov.pl silently dropped while the rest of the internet was fine), so the
+# fetcher now self-limits rather than going as fast as the server allows.
+MAX_RPS = float(os.environ.get("MAX_RPS", "2.0"))
+_rl_lock = threading.Lock()
+_next_slot = [0.0]
+def throttle():
+    with _rl_lock:
+        now = time.time()
+        slot = max(now, _next_slot[0])
+        _next_slot[0] = slot + 1.0 / MAX_RPS
+    wait = slot - time.time()
+    if wait > 0:
+        time.sleep(wait)
+
+def reachable():
+    """Preflight: is the API answering at all? Avoids burning the catalogue."""
+    import socket
+    try:
+        socket.create_connection(("bdl.stat.gov.pl", 443), timeout=15).close()
+        return True
+    except OSError:
+        return False
+
 def next_key():
     with _lock:
         live = [k for k in KEYS if _state[k] > 50]
@@ -51,8 +75,11 @@ def next_key():
         return k
 
 def get(url, tries=6):
-    """GET with key rotation; returns parsed json or None. Tracks quota headers."""
+    """GET with key rotation. Returns dict on success, None for a real 404,
+    or "FAIL" when the request could not be completed — the caller MUST NOT
+    treat "FAIL" as 'this variable has no data'."""
     for attempt in range(tries):
+        throttle()
         k = next_key()
         if k is None:
             return "EXHAUSTED"
@@ -73,19 +100,23 @@ def get(url, tries=6):
                 return None
             time.sleep(1 + attempt)
         except (URLError, TimeoutError, json.JSONDecodeError, ValueError):
-            time.sleep(1 + attempt)
-    return None
+            time.sleep(2 ** attempt)          # back off properly, don't hammer
+    return "FAIL"
 
 def fetch_pair(job):
-    """All locality rows for one (variable, macroregion), paged."""
+    """All locality rows for one (variable, macroregion), paged.
+    Returns (var, macro, rows, ok). ok=False means the fetch FAILED and the
+    variable must not be checkpointed as done."""
     var, macro = job
     out, page = [], 0
     while True:
         d = get(f"{BASE}/data/localities/by-variable/{var}"
                 f"?unit-parent-id={macro}&format=json&page-size=100&page={page}")
-        if d == "EXHAUSTED":
-            return var, macro, None            # signal: out of quota
-        if not d or "results" not in d:
+        if d == "EXHAUSTED" or d == "FAIL":
+            return var, macro, out, False      # out of quota / unreachable
+        if d is None:
+            break                              # genuine 404 -> nothing here
+        if "results" not in d:
             break
         for row in d["results"]:
             uid = str(row.get("id", ""))
@@ -96,7 +127,7 @@ def fetch_pair(job):
         if not (d.get("links") or {}).get("next"):
             break
         page += 1
-    return var, macro, out
+    return var, macro, out, True
 
 def convert_shard(path, idx):
     """CSV shard -> parquet part, then drop the CSV (disk would not hold them)."""
@@ -132,7 +163,12 @@ def main():
     shard_idx = len([f for f in os.listdir(os.path.join(ROOT, "lake_v2", "facts_localities"))
                      if f.startswith("part-")]) if os.path.isdir(
                      os.path.join(ROOT, "lake_v2", "facts_localities")) else 0
+    if not reachable():
+        sys.exit("bdl.stat.gov.pl:443 is not reachable — refusing to start "
+                 "(a failed run would otherwise mark variables as done). "
+                 "We were TCP-blocked once after sustained scraping; wait it out.")
     donef = open(DONE_FILE, "a")
+    consecutive_bad = 0
 
     for bi, start in enumerate(range(0, len(todo), BATCH_VARS)):
         if MAX_BATCHES and bi >= MAX_BATCHES:
@@ -141,11 +177,10 @@ def main():
         jobs = [(v, m) for v in batch for m in MACROS]
         rows, exhausted, failed = [], False, set()
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-            for var, macro, res in ex.map(fetch_pair, jobs):
-                if res is None:
-                    exhausted = True; failed.add(var)
-                else:
-                    rows.extend(res)
+            for var, macro, res, ok in ex.map(fetch_pair, jobs):
+                rows.extend(res)
+                if not ok:
+                    exhausted = True; failed.add(var)   # never checkpoint these
         if rows:
             path = os.path.join(SHARD_DIR, f"shard-{shard_idx:05d}.csv")
             with open(path, "w", newline="") as f:
@@ -164,9 +199,20 @@ def main():
         print(f"  batch {start//BATCH_VARS + 1}: +{len(rows):,} obs | "
               f"vars done {len(done)+start+len(batch)-len(failed):,}/{len(lvl7):,} | "
               f"quota min-key {left:,}", flush=True)
-        if exhausted:
-            print("QUOTA EXHAUSTED — stopping cleanly; rerun later to resume.", flush=True)
+        if failed:
+            consecutive_bad += 1
+        else:
+            consecutive_bad = 0
+        # Circuit breaker: if the API stops answering, STOP. Previously a dead
+        # API looked like "no data" and 579 variables were checkpointed empty.
+        if consecutive_bad >= 3:
+            print(f"ABORTING: {consecutive_bad} consecutive batches had failed fetches "
+                  f"({len(failed)} vars in the last one). The API is unreachable or "
+                  f"throttling us — nothing was checkpointed for them. "
+                  f"Wait, verify reachability, then rerun to resume.", flush=True)
             break
+        if exhausted:
+            print(f"  (batch had {len(failed)} failed variables — left for a later run)", flush=True)
     donef.close()
     print("run finished", flush=True)
 
