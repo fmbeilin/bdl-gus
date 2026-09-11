@@ -29,7 +29,10 @@ BASE = "https://bdl.stat.gov.pl/api/v1"
 # can stay up for weeks). Only ~17MB of inputs are needed and the full output
 # is ~3.5GB, so the job does not need the original drive.
 ROOT = os.environ.get("BDL_ROOT") or os.path.dirname(os.path.abspath(__file__))
-SHARD_DIR = os.path.join(ROOT, "localities_shards")
+# Scratch CSVs are written then deleted every batch. Keep them OUT of any synced
+# folder (Dropbox would upload and remove hundreds of MB per batch for weeks).
+SHARD_DIR = os.environ.get("BDL_TMP") or os.path.join(
+    os.environ.get("TMPDIR", "/tmp"), "bdl_localities_shards")
 DONE_FILE = os.path.join(ROOT, "localities_done.txt")
 MACROS = ["010000000000", "020000000000", "030000000000", "040000000000",
           "050000000000", "060000000000", "070000000000"]
@@ -145,7 +148,10 @@ def _convert_with_pyarrow(path, out):
 def convert_shard(path, idx):
     """CSV shard -> parquet part, then drop the CSV (disk would not hold them).
     Uses pyarrow when available, else falls back to R+duckdb."""
-    out = os.path.join(ROOT, "lake_v2", "facts_localities", f"part-{idx:05d}.parquet")
+    import socket
+    host = socket.gethostname().split(".")[0][:12].replace("_", "-")
+    out = os.path.join(ROOT, "lake_v2", "facts_localities",
+                       f"part-{host}-{int(time.time())}-{idx:05d}.parquet")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     try:
         _convert_with_pyarrow(path, out)
@@ -182,9 +188,7 @@ def main():
     todo = [v for v in lvl7 if v not in done]
     print(f"level-7 variables: {len(lvl7):,} | done: {len(done):,} | todo: {len(todo):,}", flush=True)
 
-    shard_idx = len([f for f in os.listdir(os.path.join(ROOT, "lake_v2", "facts_localities"))
-                     if f.startswith("part-")]) if os.path.isdir(
-                     os.path.join(ROOT, "lake_v2", "facts_localities")) else 0
+    shard_idx = 0   # filenames carry host+timestamp, so this is just a counter
     if not reachable():
         sys.exit("bdl.stat.gov.pl:443 is not reachable — refusing to start "
                  "(a failed run would otherwise mark variables as done). "

@@ -54,6 +54,31 @@ Stop the old run with:
 pkill -f run_localities.sh ; pkill -f fetch_localities.py
 ```
 
+## 4b. Running it out of Dropbox (current setup)
+
+The working set now lives at:
+
+```
+~/Dropbox-Princeton/Felix Beilin/T72 Backup/bdl-localities/
+```
+
+so both machines see the same checkpoint and neither repeats work. It holds the
+scripts, `variables_catalog.csv`, `localities_done.txt`, `.bdl_keys`,
+`lake_v2/facts_localities/`, a `CLAUDE.md` with the operating notes, and a
+`memory-snapshot/` copy of the project memory.
+
+Two deliberate choices:
+
+- **Temp CSV shards go to the system temp dir, not Dropbox** (`BDL_TMP`). Each
+  batch writes then deletes hundreds of MB; syncing that for weeks would be
+  pure churn.
+- **Part files are named `part-{host}-{epoch}-{n}.parquet`.** The old
+  count-based numbering would collide if Dropbox had not finished syncing when
+  the second machine started.
+
+**Let Dropbox finish syncing before starting the other machine**, or it resumes
+from a stale checkpoint and redoes work.
+
 ## 5. Getting the data back
 
 Output is `lake_v2/facts_localities/part-*.parquet` — independent files, safe to
