@@ -11,7 +11,9 @@
 # Watch:  tail -f fetch_localities.log
 # Stop:   pkill -f run_localities.sh ; pkill -f fetch_localities.py
 cd "${BDL_ROOT:-$(cd "$(dirname "$0")" && pwd)}" || exit 1
-export BDL_KEYS="$(cat .bdl_keys)"
+# keys: prefer an already-exported value (launchd passes them), else the file
+[ -n "${BDL_KEYS:-}" ] || { [ -f .bdl_keys ] && export BDL_KEYS="$(cat .bdl_keys)"; }
+[ -n "${BDL_KEYS:-}" ] || { echo "no BDL_KEYS and no .bdl_keys" >&2; exit 1; }
 TOTAL=7713
 BACKOFF=300                 # grows to 6h while no progress is being made
 log() { echo "[$(date '+%F %T')] watcher: $1" >> fetch_localities.log }
