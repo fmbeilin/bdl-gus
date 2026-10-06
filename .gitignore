@@ -38,3 +38,5 @@ subject_tree.csv
 localities_shards/
 localities_done.txt
 attributes.csv
+__pycache__/
+*.bak

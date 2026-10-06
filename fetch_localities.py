@@ -20,7 +20,7 @@ CSV shards are converted to parquet and deleted as we go (the full raw CSV would
 not fit on disk).
 """
 import csv, json, os, subprocess, sys, threading, time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
@@ -38,7 +38,10 @@ MACROS = ["010000000000", "020000000000", "030000000000", "040000000000",
           "050000000000", "060000000000", "070000000000"]
 BATCH_VARS = int(os.environ.get("BATCH_VARS", "40"))
 WORKERS = int(os.environ.get("WORKERS", "10"))
-MAX_BATCHES = int(os.environ.get("MAX_BATCHES", "0"))   # 0 = unlimited (testing aid)
+MAX_BATCHES = int(os.environ.get("MAX_BATCHES", "0"))
+FLUSH_VARS = int(os.environ.get("FLUSH_VARS", "5"))      # write + checkpoint after this many finished variables
+FLUSH_SEC = int(os.environ.get("FLUSH_SEC", "600"))      # ... or after this many seconds
+_flush_n = [0]                                            # part-file counter within this run   # 0 = unlimited (testing aid)
 
 KEYS = [k.strip() for k in os.environ.get("BDL_KEYS", "").split(",") if k.strip()]
 if not KEYS:
@@ -105,11 +108,20 @@ def get(url, tries=6):
             if e.code == 404:
                 return None
             time.sleep(1 + attempt)
-        except (URLError, TimeoutError, json.JSONDecodeError, ValueError):
+        except (URLError, TimeoutError, OSError, json.JSONDecodeError, ValueError):  # OSError covers socket.timeout on Python 3.9
             time.sleep(2 ** attempt)          # back off properly, don't hammer
     return "FAIL"
 
 def fetch_pair(job):
+    """Wrapper: any unexpected exception marks this (variable, macroregion) as failed
+    (not checkpointed) instead of stopping the whole run."""
+    try:
+        return _fetch_pair(job)
+    except Exception as e:
+        print(f"  ! {job[0]}/{job[1]}: {type(e).__name__}: {e}"[:200], flush=True)
+        return job[0], job[1], [], False
+
+def _fetch_pair(job):
     """All locality rows for one (variable, macroregion), paged.
     Returns (var, macro, rows, ok). ok=False means the fetch FAILED and the
     variable must not be checkpointed as done."""
@@ -224,6 +236,16 @@ def main():
             with open(DONE_FILE, "w") as f:
                 f.write("\n".join(sorted(done, key=int)) + ("\n" if done else ""))
     todo = [v for v in lvl7 if v not in done]
+    # ONLY_VARS: comma-separated variable ids, fetched in the given order (a priority run).
+    # Same checkpoint and output folder as the full sweep, which later skips these ids.
+    only = [v.strip() for v in os.environ.get("ONLY_VARS", "").split(",") if v.strip()]
+    if only:
+        known = set(lvl7)
+        bad = [v for v in only if v not in known]
+        if bad:
+            sys.exit(f"ONLY_VARS has ids that are not level-7 variables: {bad[:10]}")
+        todo = [v for v in only if v not in done]
+        print(f"ONLY_VARS: {len(only)} requested, {len(todo)} still to fetch", flush=True)
     print(f"level-7 variables: {len(lvl7):,} | done: {len(done):,} | todo: {len(todo):,}", flush=True)
 
     shard_idx = 0   # filenames carry host+timestamp, so this is just a counter
@@ -239,26 +261,44 @@ def main():
             print('MAX_BATCHES reached (test mode)', flush=True); break
         batch = todo[start:start + BATCH_VARS]
         jobs = [(v, m) for v in batch for m in MACROS]
+        # Each variable is written to parquet and checkpointed soon after its 7 macroregions
+        # finish (every FLUSH_VARS variables or FLUSH_SEC seconds), so a crash loses minutes,
+        # not the whole batch. A variable with any failed macroregion is never checkpointed.
         rows, exhausted, failed = [], False, set()
+        got = {v: [] for v in batch}; nmac = {v: 0 for v in batch}
+        ready, last_flush = [], time.time()
+        def flush():
+            nonlocal_rows = [r for v in ready for r in got[v]]
+            if nonlocal_rows:
+                path = os.path.join(SHARD_DIR, f"shard-{os.getpid()}-{int(time.time()*1000)}.csv")
+                with open(path, "w", newline="") as f:
+                    w = csv.writer(f)
+                    w.writerow(["variable_id", "unitId", "unitName", "parent_gmina",
+                                "year", "value", "attr_id"])
+                    w.writerows(nonlocal_rows)
+                _flush_n[0] += 1
+                if not convert_shard(path, _flush_n[0]):
+                    return False                      # conversion failed: do not checkpoint
+            for v in ready:
+                donef.write(v + "\n"); rows.extend(got[v]); got[v] = []
+            donef.flush(); os.fsync(donef.fileno())
+            ready.clear()
+            return True
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-            for var, macro, res, ok in ex.map(fetch_pair, jobs):
-                rows.extend(res)
-                if not ok:
-                    exhausted = True; failed.add(var)   # never checkpoint these
-        if rows:
-            path = os.path.join(SHARD_DIR, f"shard-{shard_idx:05d}.csv")
-            with open(path, "w", newline="") as f:
-                w = csv.writer(f)
-                w.writerow(["variable_id", "unitId", "unitName", "parent_gmina",
-                            "year", "value", "attr_id"])
-                w.writerows(rows)
-            if convert_shard(path, shard_idx):
-                shard_idx += 1
-        # only mark variables fully fetched (not the ones cut short by quota)
-        for v in batch:
-            if v not in failed:
-                donef.write(v + "\n")
-        donef.flush()
+            futs = [ex.submit(fetch_pair, jb) for jb in jobs]
+            for fu in as_completed(futs):
+                var, macro, res, ok = fu.result()
+                nmac[var] += 1
+                if ok:
+                    got[var].extend(res)
+                else:
+                    exhausted = True; failed.add(var); got[var] = []
+                if nmac[var] == len(MACROS) and var not in failed:
+                    ready.append(var)
+                if ready and (len(ready) >= FLUSH_VARS or time.time() - last_flush >= FLUSH_SEC):
+                    flush(); last_flush = time.time()
+        if ready:
+            flush()
         left = min(_state.values()) if _state else 0
         print(f"  batch {start//BATCH_VARS + 1}: +{len(rows):,} obs | "
               f"vars done {len(done)+start+len(batch)-len(failed):,}/{len(lvl7):,} | "
