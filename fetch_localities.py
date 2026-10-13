@@ -264,7 +264,7 @@ def main():
         # Each variable is written to parquet and checkpointed soon after its 7 macroregions
         # finish (every FLUSH_VARS variables or FLUSH_SEC seconds), so a crash loses minutes,
         # not the whole batch. A variable with any failed macroregion is never checkpointed.
-        rows, exhausted, failed = [], False, set()
+        nobs, exhausted, failed = [0], False, set()   # count only: rows already written to parquet are not kept
         got = {v: [] for v in batch}; nmac = {v: 0 for v in batch}
         ready, last_flush = [], time.time()
         def flush():
@@ -280,7 +280,7 @@ def main():
                 if not convert_shard(path, _flush_n[0]):
                     return False                      # conversion failed: do not checkpoint
             for v in ready:
-                donef.write(v + "\n"); rows.extend(got[v]); got[v] = []
+                donef.write(v + "\n"); nobs[0] += len(got[v]); got[v] = []
             donef.flush(); os.fsync(donef.fileno())
             ready.clear()
             return True
@@ -300,7 +300,7 @@ def main():
         if ready:
             flush()
         left = min(_state.values()) if _state else 0
-        print(f"  batch {start//BATCH_VARS + 1}: +{len(rows):,} obs | "
+        print(f"  batch {start//BATCH_VARS + 1}: +{nobs[0]:,} obs | "
               f"vars done {len(done)+start+len(batch)-len(failed):,}/{len(lvl7):,} | "
               f"quota min-key {left:,}", flush=True)
         if failed:
