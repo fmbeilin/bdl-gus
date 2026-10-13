@@ -52,6 +52,20 @@ if not KEYS:
 _state = {k: 10**9 for k in KEYS}      # key -> remaining quota (optimistic until seen)
 _idx = [0]
 _lock = threading.Lock()
+# Pages fetched since the last checkpoint write, for the progress banner: a slow variable
+# can take an hour to finish, and the checkpoint alone looks stalled meanwhile.
+HEARTBEAT = os.path.join(SHARD_DIR, "heartbeat.txt")
+_pages = [0]
+def _beat(reset=False):
+    with _lock:
+        _pages[0] = 0 if reset else _pages[0] + 1
+        n = _pages[0]
+    if reset or n % 10 == 0:
+        try:
+            with open(HEARTBEAT, "w") as f:
+                f.write(f"{n}\n")
+        except OSError:
+            pass
 
 # Sustained scraping got this client TCP-blocked by GUS once (connections to
 # stat.gov.pl silently dropped while the rest of the internet was fine), so the
@@ -145,6 +159,7 @@ def _fetch_pair(job):
             for v in row.get("values", []):
                 out.append((var, uid, nm, uid[:12], v.get("year"),
                             v.get("val"), v.get("attrId", "")))
+        _beat()
         if not (d.get("links") or {}).get("next"):
             break
         page += 1
@@ -286,6 +301,7 @@ def main():
                 donef.write(v + "\n"); nobs[0] += len(got[v]); got[v] = []
             donef.flush(); os.fsync(donef.fileno())
             ready.clear()
+            _beat(reset=True)
             return True
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
             futs = [ex.submit(fetch_pair, jb) for jb in jobs]
