@@ -40,6 +40,9 @@ BATCH_VARS = int(os.environ.get("BATCH_VARS", "40"))
 WORKERS = int(os.environ.get("WORKERS", "10"))
 MAX_BATCHES = int(os.environ.get("MAX_BATCHES", "0"))
 FLUSH_VARS = int(os.environ.get("FLUSH_VARS", "5"))      # write + checkpoint after this many finished variables
+# Some variables take GUS ~60s per page; a shorter timeout makes those pages fail on
+# every retry, so they can never finish.
+REQ_TIMEOUT = int(os.environ.get("REQ_TIMEOUT", "120"))
 FLUSH_SEC = int(os.environ.get("FLUSH_SEC", "600"))      # ... or after this many seconds
 _flush_n = [0]                                            # part-file counter within this run   # 0 = unlimited (testing aid)
 
@@ -94,7 +97,7 @@ def get(url, tries=6):
             return "EXHAUSTED"
         try:
             with urlopen(Request(url, headers={"X-ClientId": k,
-                         "User-Agent": "bdl-gus-explorer/1.0"}), timeout=45) as r:
+                         "User-Agent": "bdl-gus-explorer/1.0"}), timeout=REQ_TIMEOUT) as r:
                 rem = r.headers.get("X-Rate-Limit-Remaining")
                 if rem is not None:
                     with _lock:
