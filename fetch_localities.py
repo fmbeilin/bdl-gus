@@ -84,11 +84,11 @@ def throttle():
 
 def reachable():
     """Preflight: is the API answering at all? Avoids burning the catalogue."""
-    import socket
+    # urlopen honours HTTPS_PROXY (the NordVPN container); a raw socket would bypass it
     try:
-        socket.create_connection(("bdl.stat.gov.pl", 443), timeout=15).close()
+        urlopen("https://bdl.stat.gov.pl/api/v1/levels", timeout=20).close()
         return True
-    except OSError:
+    except (OSError, HTTPError):
         return False
 
 def next_key():
@@ -313,7 +313,15 @@ def main():
                 else:
                     exhausted = True; failed.add(var); got[var] = []
                 if nmac[var] == len(MACROS) and var not in failed:
-                    ready.append(var)
+                    if got[var]:
+                        ready.append(var)
+                    else:
+                        # Every level-7 variable in the catalogue has locality data. Zero rows
+                        # from all 7 macroregions means GUS answered "not found" while misbehaving
+                        # (seen Oct 8-20: 91 variables were checkpointed empty this way), so this
+                        # is a failure to retry, never "done".
+                        exhausted = True; failed.add(var)
+                        print(f"  ! {var}: 0 rows from all {len(MACROS)} macroregions — not checkpointed", flush=True)
                 if ready and (len(ready) >= FLUSH_VARS or time.time() - last_flush >= FLUSH_SEC):
                     flush(); last_flush = time.time()
         if ready:

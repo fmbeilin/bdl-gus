@@ -17,9 +17,17 @@ cd "${BDL_ROOT:-$(cd "$(dirname "$0")" && pwd)}" || exit 1
 TOTAL=7713
 BACKOFF=300                 # grows to 6h while no progress is being made
 log() { echo "[$(date '+%F %T')] watcher: $1" >> fetch_localities.log }
-reachable() { python3 -c "import socket;socket.create_connection(('bdl.stat.gov.pl',443),timeout=15).close()" 2>/dev/null }
+# urllib honours HTTPS_PROXY (the NordVPN container on localhost:8888); a raw socket would not
+reachable() { python3 -c "import urllib.request as u;u.urlopen('https://bdl.stat.gov.pl/api/v1/levels',timeout=20).close()" 2>/dev/null }
 
 log "started; waiting for bdl.stat.gov.pl to accept connections"
+
+# Merge the extractor's small part files into large ones once a day. Safe while the
+# extractor runs (see compact_localities.py); started once, survives watcher restarts.
+if [ -f compact_localities.py ] && ! pgrep -f "compact_localities.py --loop" >/dev/null; then
+  nohup python3 compact_localities.py --loop 86400 >> compact_localities.log 2>&1 &
+  log "daily merge of small part files started"
+fi
 while true; do
   done_n=$(wc -l < localities_done.txt 2>/dev/null | tr -d ' '); done_n=${done_n:-0}
   if [ "$done_n" -ge "$TOTAL" ]; then log "ALL DONE ($done_n/$TOTAL)"; break; fi
