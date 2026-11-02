@@ -34,6 +34,10 @@ ROOT = os.environ.get("BDL_ROOT") or os.path.dirname(os.path.abspath(__file__))
 SHARD_DIR = os.environ.get("BDL_TMP") or os.path.join(
     os.environ.get("TMPDIR", "/tmp"), "bdl_localities_shards")
 DONE_FILE = os.path.join(ROOT, "localities_done.txt")
+# Variables in our catalogue (variables_catalog.csv, Dec 2025) that GUS has since deleted:
+# /variables/{id} answers "resource does not exist". Kept apart from DONE_FILE, which only
+# ever lists variables whose data was written.
+REMOVED_FILE = os.path.join(ROOT, "localities_removed.txt")
 MACROS = ["010000000000", "020000000000", "030000000000", "040000000000",
           "050000000000", "060000000000", "070000000000"]
 BATCH_VARS = int(os.environ.get("BATCH_VARS", "40"))
@@ -253,7 +257,10 @@ def main():
             done = derived
             with open(DONE_FILE, "w") as f:
                 f.write("\n".join(sorted(done, key=int)) + ("\n" if done else ""))
-    todo = [v for v in lvl7 if v not in done]
+    removed = set()
+    if os.path.exists(REMOVED_FILE):
+        removed = {l.strip() for l in open(REMOVED_FILE) if l.strip()}
+    todo = [v for v in lvl7 if v not in done and v not in removed]
     # ONLY_VARS: comma-separated variable ids, fetched in the given order (a priority run).
     # Same checkpoint and output folder as the full sweep, which later skips these ids.
     only = [v.strip() for v in os.environ.get("ONLY_VARS", "").split(",") if v.strip()]
@@ -264,7 +271,8 @@ def main():
             sys.exit(f"ONLY_VARS has ids that are not level-7 variables: {bad[:10]}")
         todo = [v for v in only if v not in done]
         print(f"ONLY_VARS: {len(only)} requested, {len(todo)} still to fetch", flush=True)
-    print(f"level-7 variables: {len(lvl7):,} | done: {len(done):,} | todo: {len(todo):,}", flush=True)
+    print(f"level-7 variables: {len(lvl7):,} | done: {len(done):,} | "
+          f"removed by GUS: {len(removed):,} | todo: {len(todo):,}", flush=True)
 
     shard_idx = 0   # filenames carry host+timestamp, so this is just a counter
     if not reachable():
@@ -319,16 +327,23 @@ def main():
                         # Every level-7 variable in the catalogue has locality data. Zero rows
                         # from all 7 macroregions means GUS answered "not found" while misbehaving
                         # (seen Oct 8-20: 91 variables were checkpointed empty this way), so this
-                        # is a failure to retry, never "done".
-                        exhausted = True; failed.add(var)
-                        print(f"  ! {var}: 0 rows from all {len(MACROS)} macroregions — not checkpointed", flush=True)
+                        # is a failure to retry, never "done" -- unless GUS says the variable
+                        # itself no longer exists (seen Nov 1: subject P2757 was deleted).
+                        if get(f"{BASE}/variables/{var}?format=json") is None:
+                            with open(REMOVED_FILE, "a") as rf:
+                                rf.write(var + "\n")
+                            removed.add(var)
+                            print(f"  - {var}: deleted from GUS's catalogue — skipped", flush=True)
+                        else:
+                            exhausted = True; failed.add(var)
+                            print(f"  ! {var}: 0 rows from all {len(MACROS)} macroregions — not checkpointed", flush=True)
                 if ready and (len(ready) >= FLUSH_VARS or time.time() - last_flush >= FLUSH_SEC):
                     flush(); last_flush = time.time()
         if ready:
             flush()
         left = min(_state.values()) if _state else 0
         print(f"  batch {start//BATCH_VARS + 1}: +{nobs[0]:,} obs | "
-              f"vars done {len(done)+start+len(batch)-len(failed):,}/{len(lvl7):,} | "
+              f"vars done {sum(1 for _ in open(DONE_FILE)):,}/{len(lvl7):,} | "
               f"quota min-key {left:,}", flush=True)
         if failed:
             consecutive_bad += 1
